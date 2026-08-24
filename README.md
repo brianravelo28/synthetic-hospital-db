@@ -27,7 +27,7 @@ Most synthetic-data generators produce rows that are individually plausible but 
 ## Quick Start
 
 ```bash
-git clone https://github.com/yourusername/synthetic-hospital-db.git
+git clone https://github.com/brianravelo28/synthetic-hospital-db.git
 cd synthetic-hospital-db
 pip install -r requirements.txt
 ```
