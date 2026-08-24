@@ -1,0 +1,21 @@
+department_id,dep_name,floor_number,bed_capacity
+DEP-001,Emergency Medicine,1,20
+DEP-002,Intensive Care,2,15
+DEP-003,Cardiology,3,25
+DEP-004,General Surgery,2,20
+DEP-005,Internal Medicine,4,30
+DEP-006,Neurology,4,20
+DEP-007,Orthopedic,3,20
+DEP-008,Pediatrics,5,25
+DEP-009,OB/GYN,5,20
+DEP-010,Oncology,6,20
+DEP-011,Gastroenterology,3,15
+DEP-012,Radiology,1,5
+DEP-013,Psychiatry,6,20
+DEP-014,Urology,3,15
+DEP-015,Geriatric,4,20
+DEP-016,Hematology,6,15
+DEP-017,Endocrinology,4,10
+DEP-018,Anesthesiology,2,5
+DEP-019,Pathology,1,3
+DEP-020,Operations,2,15

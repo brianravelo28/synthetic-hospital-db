@@ -1,0 +1,11 @@
+payer_id,payer_name,payer_type,contact_phone
+PAY-001,Medicare,Medicare,1-800-633-4227
+PAY-002,Medicaid Florida,Medicaid,1-877-711-3662
+PAY-003,Blue Cross Blue Shield,Private Insurance,1-800-521-2227
+PAY-004,Aetna Health,Private Insurance,1-800-872-3862
+PAY-005,UnitedHealthcare,Private Insurance,1-866-414-1959
+PAY-006,Cigna Healthcare,Private Insurance,1-800-244-6224
+PAY-007,Self-Pay,Self-Pay,
+PAY-008,Florida Workers Compensation,Workers Compensation,1-800-742-2214
+PAY-009,CHIP Florida,CHIP,1-888-540-5437
+PAY-010,Humana,Private Insurance,1-800-448-6262

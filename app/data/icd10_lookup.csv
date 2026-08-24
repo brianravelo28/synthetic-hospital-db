@@ -1,0 +1,67 @@
+icd10_code,diagnosis_name
+I50.9,"Heart failure, unspecified"
+I21.9,"Acute myocardial infarction, unspecified"
+I10,Essential (primary) hypertension
+I48.91,Unspecified atrial fibrillation
+I63.9,"Cerebral infarction, unspecified"
+I25.10,Atherosclerotic heart disease of native coronary artery
+I35.0,Nonrheumatic aortic (valve) stenosis
+J18.9,"Pneumonia, unspecified organism"
+J44.1,Chronic obstructive pulmonary disease with acute exacerbation
+J96.00,"Acute respiratory failure, unspecified"
+J45.901,Unspecified asthma with (acute) exacerbation
+J12.89,Other viral pneumonia
+E11.9,Type 2 diabetes mellitus without complications
+E11.65,Type 2 diabetes mellitus with hyperglycemia
+E10.9,Type 1 diabetes mellitus without complications
+E86.0,Dehydration
+E87.1,Hyponatremia
+E87.6,Hypokalemia
+E66.9,"Obesity, unspecified"
+A41.9,"Sepsis, unspecified organism"
+A41.01,Sepsis due to methicillin susceptible Staphylococcus aureus
+N39.0,"Urinary tract infection, site not specified"
+A04.72,"Enterocolitis due to Clostridium difficile, not specified as recurrent"
+B34.9,"Viral infection, unspecified"
+K92.1,Melena
+K57.32,Diverticulitis of large intestine without perforation or abscess
+K80.20,Calculus of gallbladder without cholecystitis
+K35.80,Other and unspecified acute appendicitis
+K74.60,Unspecified cirrhosis of liver
+K56.60,Unspecified intestinal obstruction
+K29.70,"Gastritis, unspecified, without bleeding"
+N17.9,"Acute kidney failure, unspecified"
+N18.9,"Chronic kidney disease, unspecified"
+N20.0,Calculus of kidney
+S72.001A,"Fracture of unspecified part of neck of right femur, initial encounter"
+M54.5,Low back pain
+S06.0X0A,"Concussion without loss of consciousness, initial encounter"
+M16.9,"Osteoarthritis of hip, unspecified"
+M17.9,"Osteoarthritis of knee, unspecified"
+T14.90,"Injury, unspecified"
+G20,Parkinson's disease
+G30.9,"Alzheimer's disease, unspecified"
+G45.9,"Transient cerebral ischemic attack, unspecified"
+G43.909,"Migraine, unspecified, not intractable"
+G40.909,"Epilepsy, unspecified, not intractable"
+F32.9,"Major depressive disorder, single episode, unspecified"
+F20.9,"Schizophrenia, unspecified"
+F10.20,"Alcohol use disorder, moderate, uncomplicated"
+F41.9,"Anxiety disorder, unspecified"
+F05,Delirium due to known physiological condition
+C34.90,Malignant neoplasm of unspecified part of unspecified bronchus and lung
+C50.919,Malignant neoplasm of unspecified site of unspecified female breast
+C18.9,"Malignant neoplasm of colon, unspecified"
+C61,Malignant neoplasm of prostate
+C92.00,"Acute myeloblastic leukemia, not having achieved remission"
+O80,Encounter for full-term uncomplicated delivery
+O34.21,Maternal care for scar from previous cesarean delivery
+O09.90,"Supervision of high-risk pregnancy, unspecified"
+O20.0,Threatened abortion
+R07.9,"Chest pain, unspecified"
+R55,Syncope and collapse
+R00.0,"Tachycardia, unspecified"
+R51,"Headache, unspecified"
+R11.2,"Nausea with vomiting, unspecified"
+Z38.00,"Single liveborn infant, delivered vaginally"
+P07.30,"Preterm newborn, unspecified weeks of gestation"

@@ -1,0 +1,14 @@
+# Data generation & pipeline (data/, src/)
+sqlalchemy>=2.0
+pymysql>=1.1
+faker>=15.0
+numpy>=1.24
+pandas>=2.0
+
+# Dashboard (app/)
+streamlit>=1.36
+plotly>=5.14
+
+# Notebooks (notebooks/)
+jupyter>=1.0
+matplotlib>=3.7

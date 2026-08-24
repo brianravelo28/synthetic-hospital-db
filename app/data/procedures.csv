@@ -1,0 +1,31 @@
+procedure_id,procedure_code,procedure_name,department_id,base_cost,duration_minutes
+PRC-001,99283,"Emergency department visit, moderate severity",DEP-001,850.0,60.0
+PRC-002,31500,Endotracheal intubation,DEP-001,1200.0,30.0
+PRC-003,36556,Central venous catheter placement,DEP-002,2100.0,45.0
+PRC-004,94002,Mechanical ventilation management,DEP-002,900.0,
+PRC-005,93306,Echocardiogram with Doppler,DEP-003,1500.0,60.0
+PRC-006,93454,Coronary artery angiography,DEP-003,8500.0,90.0
+PRC-007,92960,"Cardioversion, elective",DEP-003,1800.0,30.0
+PRC-008,33533,Coronary artery bypass graft,DEP-020,42000.0,240.0
+PRC-009,44950,Appendectomy,DEP-004,7500.0,90.0
+PRC-010,47562,Laparoscopic cholecystectomy,DEP-004,9000.0,75.0
+PRC-011,49505,Inguinal hernia repair,DEP-004,6200.0,60.0
+PRC-012,71046,"Chest X-ray, 2 views",DEP-012,220.0,15.0
+PRC-013,74177,CT scan abdomen and pelvis with contrast,DEP-012,1800.0,30.0
+PRC-014,70553,MRI brain with and without contrast,DEP-012,2400.0,60.0
+PRC-015,78452,Myocardial perfusion imaging,DEP-012,3100.0,90.0
+PRC-016,95819,Electroencephalogram (EEG),DEP-006,900.0,60.0
+PRC-017,62270,Lumbar puncture (spinal tap),DEP-006,1100.0,30.0
+PRC-018,27130,Total hip arthroplasty,DEP-007,22000.0,150.0
+PRC-019,27447,Total knee arthroplasty,DEP-007,20000.0,120.0
+PRC-020,27236,"Open reduction internal fixation, femoral neck",DEP-007,15000.0,120.0
+PRC-021,59400,"Routine obstetric care, vaginal delivery",DEP-009,5500.0,
+PRC-022,59510,"Routine obstetric care, cesarean delivery",DEP-009,9500.0,90.0
+PRC-023,45378,"Colonoscopy, diagnostic",DEP-011,1800.0,45.0
+PRC-024,43239,Upper GI endoscopy with biopsy,DEP-011,1500.0,30.0
+PRC-025,96413,"Chemotherapy administration, IV infusion",DEP-010,2200.0,120.0
+PRC-026,77373,Stereotactic body radiation therapy,DEP-010,5000.0,60.0
+PRC-027,52310,Cystoscopy with removal of ureteral stone,DEP-014,4500.0,45.0
+PRC-028,90837,"Psychotherapy, 60 minutes",DEP-013,250.0,60.0
+PRC-029,99232,"Subsequent hospital care, moderate complexity",DEP-005,420.0,30.0
+PRC-030,36430,Blood transfusion,DEP-002,1100.0,90.0
