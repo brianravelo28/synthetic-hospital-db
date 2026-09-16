@@ -2,7 +2,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![Streamlit](https://img.shields.io/badge/dashboard-Streamlit-FF4B4B.svg)](https://streamlit.io/)
+[![Live Demo](https://img.shields.io/badge/dashboard-Live%20Demo-FF4B4B.svg?logo=streamlit&logoColor=white)](https://synthetic-hospital-db.streamlit.app/)
+
+**[Live Demo →](https://synthetic-hospital-db.streamlit.app/)**
 
 **100% synthetic — no real patient data.** A constraint-aware generator for a realistic, fully-relational 17-table hospital database (MySQL), a validation/repair pipeline that catches and fixes semantic violations a naive generator can't avoid, and a 5-page operations dashboard built on top of it. Built to demonstrate data-engineering and data-quality thinking, not to model any real institution — see [Data Sources & References](docs/CITATIONS.md#synthetic-data-disclosure) for the full disclosure.
 
@@ -72,6 +74,8 @@ jupyter notebook notebooks/
 - `02_data_quality_validation.ipynb` — a **live** re-run of the full generate → validate → repair cycle, capturing real before/after numbers (⚠️ truncates and regenerates `hospital_db` — see the notebook's own warning)
 
 ## Dashboard
+
+**[→ Try it live](https://synthetic-hospital-db.streamlit.app/)** — no install needed.
 
 5 pages, each browser-verified against real (synthetic) data:
 
