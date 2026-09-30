@@ -17,6 +17,7 @@ from utils import (
     fmt_count,
     fmt_pct,
     load_data,
+    render_kpi_row,
 )
 
 data = load_data()
@@ -25,6 +26,11 @@ departments = data["departments"]
 triage = data["triage"]
 
 st.title("🛏️ Admissions & Census")
+
+# KPI row is reserved here (top, right after the title) so its position
+# stays stable across every page — filled in below, after the filters,
+# once the filtered values it depends on are known.
+kpi_slot = st.container()
 
 # ── Filter row ───────────────────────────────────────────────────────────
 min_date, max_date = admissions["admission_date"].min(), admissions["admission_date"].max()
@@ -53,16 +59,18 @@ if type_filter:
 st.caption(f"{len(adm):,} admissions match the current filters")
 st.divider()
 
-# ── KPI row ──────────────────────────────────────────────────────────────
+# ── KPI row (rendered into the slot reserved above) ─────────────────────
 discharged = adm[adm["admission_status"] == "Discharged"]
 cancelled_rate = (adm["admission_status"] == "Cancelled").mean() * 100 if len(adm) else 0
 active_now = (adm["admission_status"] == "Admitted").sum()
 
-k1, k2, k3, k4 = st.columns(4)
-k1.metric("Admissions", fmt_count(len(adm)))
-k2.metric("Currently admitted", fmt_count(active_now))
-k3.metric("Avg. length of stay", f"{discharged['length_of_stay'].mean():.1f} days" if len(discharged) else "—")
-k4.metric("Cancellation rate", fmt_pct(cancelled_rate))
+with kpi_slot:
+    render_kpi_row([
+        ("Admissions", fmt_count(len(adm))),
+        ("Currently admitted", fmt_count(active_now)),
+        ("Avg. length of stay", f"{discharged['length_of_stay'].mean():.1f} days" if len(discharged) else "—"),
+        ("Cancellation rate", fmt_pct(cancelled_rate)),
+    ])
 
 st.divider()
 col1, col2 = st.columns(2)

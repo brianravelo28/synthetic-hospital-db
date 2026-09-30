@@ -15,6 +15,7 @@ from utils import (
     STAFF_TYPE_COLORS,
     fmt_count,
     load_data,
+    render_kpi_row,
 )
 
 data = load_data()
@@ -26,11 +27,12 @@ staff_shifts = data["staff_shifts"]
 
 st.title("👩‍⚕️ Staffing")
 
-k1, k2, k3, k4 = st.columns(4)
-k1.metric("Doctors", fmt_count(len(doctors)))
-k2.metric("Nurses", fmt_count(len(nurses)))
-k3.metric("Employees", fmt_count(len(employees)))
-k4.metric("Total shift-hours logged", fmt_count(staff_shifts["hours_worked"].sum()))
+render_kpi_row([
+    ("Doctors", fmt_count(len(doctors))),
+    ("Nurses", fmt_count(len(nurses))),
+    ("Employees", fmt_count(len(employees))),
+    ("Total shift-hours logged", fmt_count(staff_shifts["hours_worked"].sum())),
+])
 
 st.divider()
 

@@ -18,6 +18,7 @@ from utils import (
     fmt_currency,
     fmt_pct,
     load_data,
+    render_kpi_row,
 )
 
 data = load_data()
@@ -33,11 +34,12 @@ total_covered = billing["insurance_covered"].sum()
 total_patient_resp = billing["patient_responsibility"].sum()
 paid_rate = (billing["payment_status"] == "Paid").mean() * 100
 
-k1, k2, k3, k4 = st.columns(4)
-k1.metric("Total billed", fmt_currency(total_billed))
-k2.metric("Insurance covered", fmt_currency(total_covered))
-k3.metric("Patient responsibility", fmt_currency(total_patient_resp))
-k4.metric("Bills fully paid", fmt_pct(paid_rate))
+render_kpi_row([
+    ("Total billed", fmt_currency(total_billed)),
+    ("Insurance covered", fmt_currency(total_covered)),
+    ("Patient responsibility", fmt_currency(total_patient_resp)),
+    ("Bills fully paid", fmt_pct(paid_rate)),
+])
 
 st.divider()
 col1, col2 = st.columns(2)

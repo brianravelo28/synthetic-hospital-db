@@ -14,6 +14,7 @@ from utils import (
     fmt_count,
     fmt_pct,
     load_data,
+    render_kpi_row,
     wrap_label,
 )
 
@@ -31,11 +32,12 @@ st.title("🩺 Clinical")
 
 abnormal_rate = medical_tests["result"].fillna("").str.startswith("Abnormal").mean() * 100
 
-k1, k2, k3, k4 = st.columns(4)
-k1.metric("Diagnoses recorded", fmt_count(len(diagnoses)))
-k2.metric("Procedures performed", fmt_count(len(patient_procedures)))
-k3.metric("Medications prescribed", fmt_count(len(medications)))
-k4.metric("Abnormal test rate", fmt_pct(abnormal_rate))
+render_kpi_row([
+    ("Diagnoses recorded", fmt_count(len(diagnoses))),
+    ("Procedures performed", fmt_count(len(patient_procedures))),
+    ("Medications prescribed", fmt_count(len(medications))),
+    ("Abnormal test rate", fmt_pct(abnormal_rate)),
+])
 
 st.divider()
 col1, col2 = st.columns(2)
