@@ -126,16 +126,40 @@ RESULT_COLORS = {
     "Pending": STATUS["neutral"],
 }
 
+# Dashboard-wide minimum font size (px). Nothing — chart chrome included —
+# should render smaller than this.
+MIN_FONT_SIZE = 13
+
 PLOTLY_LAYOUT = dict(
     template="plotly_white",
-    font=dict(family="system-ui, -apple-system, Segoe UI, sans-serif", color="#0b0b0b"),
+    font=dict(family="system-ui, -apple-system, Segoe UI, sans-serif", color="#0b0b0b", size=MIN_FONT_SIZE),
     plot_bgcolor=CHART_SURFACE,
     paper_bgcolor=CHART_SURFACE,
     margin=dict(l=10, r=10, t=40, b=10),
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, font=dict(size=MIN_FONT_SIZE)),
 )
 
-AXIS_STYLE = dict(gridcolor=GRID_HAIRLINE, linecolor="#c3c2b7", zeroline=False)
+AXIS_STYLE = dict(
+    gridcolor=GRID_HAIRLINE, linecolor="#c3c2b7", zeroline=False,
+    tickfont=dict(size=MIN_FONT_SIZE), title_font=dict(size=MIN_FONT_SIZE),
+)
+
+# Injected once from app.py — Streamlit's own chrome (captions, metric
+# labels, widget labels, etc.) can render below MIN_FONT_SIZE by default.
+BASE_CSS = f"""
+<style>
+[data-testid="stCaptionContainer"] p,
+[data-testid="stCaptionContainer"] span,
+.stCaption,
+small,
+[data-testid="stMetricLabel"],
+[data-testid="stMetricDelta"],
+[data-testid="stWidgetLabel"] p,
+[data-testid="stMarkdownContainer"] p {{
+    font-size: {MIN_FONT_SIZE}px !important;
+}}
+</style>
+"""
 
 # ── Date columns to parse per table ─────────────────────────────────────────
 
