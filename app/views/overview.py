@@ -17,6 +17,7 @@ from utils import (
     fmt_count,
     fmt_currency,
     load_data,
+    render_kpi_row,
 )
 
 data = load_data()
@@ -40,12 +41,13 @@ outstanding = billing["patient_responsibility"].where(
     billing["payment_status"].isin(["Pending", "Partial"]), 0
 ).sum()
 
-k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("Patients", fmt_count(len(patients)))
-k2.metric("Admissions", fmt_count(len(admissions)))
-k3.metric("Avg. length of stay", f"{avg_los:.1f} days")
-k4.metric("Total billed", fmt_currency(total_revenue))
-k5.metric("Outstanding balance", fmt_currency(outstanding))
+render_kpi_row([
+    ("Patients", fmt_count(len(patients))),
+    ("Admissions", fmt_count(len(admissions))),
+    ("Avg. length of stay", f"{avg_los:.1f} days"),
+    ("Total billed", fmt_currency(total_revenue)),
+    ("Outstanding balance", fmt_currency(outstanding)),
+])
 
 st.divider()
 

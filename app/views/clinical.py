@@ -14,6 +14,7 @@ from utils import (
     fmt_count,
     fmt_pct,
     load_data,
+    wrap_label,
 )
 
 data = load_data()
@@ -46,9 +47,10 @@ with col1:
     top_dx = dx["diagnosis_name"].value_counts().head(10).reset_index()
     top_dx.columns = ["diagnosis_name", "count"]
     top_dx = top_dx.sort_values("count")
-    fig = px.bar(top_dx, x="count", y="diagnosis_name", orientation="h")
+    top_dx["diagnosis_label"] = top_dx["diagnosis_name"].apply(lambda t: wrap_label(t, width=30))
+    fig = px.bar(top_dx, x="count", y="diagnosis_label", orientation="h")
     fig.update_traces(marker_color=CATEGORICAL[0])
-    fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, xaxis_title="", yaxis_title="", height=420)
+    fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, xaxis_title="", yaxis_title="", height=460)
     fig.update_xaxes(**AXIS_STYLE)
     fig.update_yaxes(**AXIS_STYLE)
     st.plotly_chart(fig, use_container_width=True)
@@ -102,13 +104,15 @@ with col5:
     result_order = ["Normal", "Abnormal - Mild", "Abnormal - Moderate", "Abnormal - Severe", "Inconclusive", "Pending"]
     res = medical_tests["result"].fillna("Pending").value_counts().reindex(result_order, fill_value=0).reset_index()
     res.columns = ["result", "count"]
+    res["result_label"] = res["result"].apply(lambda t: wrap_label(t, width=11))
+    label_order = res.set_index("result").loc[result_order, "result_label"].tolist()
     fig = px.bar(
-        res, x="result", y="count", color="result", color_discrete_map=RESULT_COLORS,
-        category_orders={"result": result_order}, text="count",
+        res, x="result_label", y="count", color="result", color_discrete_map=RESULT_COLORS,
+        category_orders={"result_label": label_order}, text="count",
     )
     fig.update_traces(textposition="outside", cliponaxis=False)
     fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, xaxis_title="", yaxis_title="")
-    fig.update_xaxes(**AXIS_STYLE, tickangle=-20)
+    fig.update_xaxes(**AXIS_STYLE, tickangle=0)
     fig.update_yaxes(**AXIS_STYLE)
     st.plotly_chart(fig, use_container_width=True)
 

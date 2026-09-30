@@ -8,6 +8,7 @@ Colors are assigned by entity/job, never by chart-local rank, so the same
 category always reads the same color across every page.
 """
 
+import textwrap
 from pathlib import Path
 
 import pandas as pd
@@ -158,6 +159,34 @@ small,
 [data-testid="stMarkdownContainer"] p {{
     font-size: {MIN_FONT_SIZE}px !important;
 }}
+
+.kpi-row {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin: 4px 0 28px 0;
+}}
+.kpi-card {{
+    flex: 1 1 180px;
+    background: {CHART_SURFACE};
+    border: 1px solid {GRID_HAIRLINE};
+    border-radius: 12px;
+    padding: 18px 22px;
+    box-shadow: 0 1px 2px rgba(11, 11, 11, 0.04);
+}}
+.kpi-label {{
+    font-size: 15px;
+    font-weight: 600;
+    color: {INK_SECONDARY};
+    margin-bottom: 8px;
+}}
+.kpi-value {{
+    font-size: 34px;
+    font-weight: 700;
+    color: #0b0b0b;
+    line-height: 1.15;
+    white-space: nowrap;
+}}
 </style>
 """
 
@@ -220,3 +249,30 @@ def fmt_pct(x: float) -> str:
     if pd.isna(x):
         return "—"
     return f"{x:.1f}%"
+
+
+def wrap_label(text: str, width: int = 25, max_lines: int = 2) -> str:
+    """
+    Wrap a long chart-axis label onto at most `max_lines` lines (joined with
+    <br>, which Plotly renders as a line break) instead of shrinking the font
+    or letting it run off the chart. Excess beyond max_lines is ellipsized.
+    """
+    lines = textwrap.wrap(text, width=width, break_long_words=False)
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        lines[-1] = lines[-1].rstrip() + "…"
+    return "<br>".join(lines)
+
+
+def render_kpi_row(items: list) -> None:
+    """
+    Render a row of styled stat-tile cards (label + large value each),
+    instead of Streamlit's plain st.metric row — see the .kpi-row/.kpi-card
+    rules in BASE_CSS. `items` is a list of (label, value) string pairs.
+    """
+    cards = "".join(
+        f'<div class="kpi-card"><div class="kpi-label">{label}</div>'
+        f'<div class="kpi-value">{value}</div></div>'
+        for label, value in items
+    )
+    st.markdown(f'<div class="kpi-row">{cards}</div>', unsafe_allow_html=True)
