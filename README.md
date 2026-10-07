@@ -23,6 +23,8 @@ Most synthetic-data generators produce rows that are individually plausible but 
   | Medium | 3,200 | 6,299 | 35 | 99.4% |
   | Large | 12,000 | 25,720 | 22 | 99.9% |
 
+  *(Each row is one recorded run; exact counts shift by a few violations between regenerations. The dataset currently shipped in `app/data/` is a later large-scale regeneration that ended at 19.)*
+
 - 📊 **5-page Streamlit dashboard**, fully self-contained (bundled CSVs, no live DB dependency) — Overview, Admissions & Census, Clinical, Staffing, Financials
 - 📓 **Two executed notebooks** with real, live-generated output — including a from-scratch re-run of the generate → validate → repair cycle, not a transcript
 
@@ -63,6 +65,8 @@ python src/export_to_csv.py         # writes app/data/*.csv from the live DB
 streamlit run app/app.py            # -> http://localhost:8501
 ```
 
+The dashboard step needs no database — it runs straight from the CSVs already committed in `app/data/`. Opening the repo in **GitHub Codespaces** does this automatically (see `.devcontainer/`).
+
 The dashboard reads **only** the exported CSVs, never a live connection — this is what makes it deployable to [Streamlit Community Cloud](https://streamlit.io/cloud) as-is, since a deployed app can't reach a local database. `app/requirements.txt` is a separate, minimal requirements file (just `streamlit`/`pandas`/`plotly`) scoped to the dashboard alone — Streamlit Cloud installs from whichever `requirements.txt` sits next to the app's entry point, and the full pipeline's dependencies (SQLAlchemy, Faker, Jupyter...) have no reason to ship with the deployed app.
 
 ### Explore the notebooks
@@ -87,7 +91,10 @@ jupyter notebook notebooks/
 | **Staffing** | Headcount by department (doctor/nurse/employee), doctor specialties, shift-type distribution, hires per year |
 | **Financials** | Revenue by payer type, payment status mix, billing line items by type, avg. bill by admission type, revenue trend |
 
-Colors are assigned by category identity (not chart-local rank or hue-cycling), with true evaluative "status" colors (e.g. payment status, discharge disposition) kept separate from plain categorical identity and from ordinal severity scales — see `app/utils.py`.
+Design notes (all in `app/utils.py`):
+- **KPI stat-tile cards** lead every page, and sit in the same position on each one — on Admissions & Census the KPI row is reserved above the filters and fills in once they're applied.
+- **Colors are assigned by category identity** (not chart-local rank or hue-cycling), with true evaluative "status" colors (e.g. payment status, discharge disposition) kept separate from plain categorical identity and from ordinal severity scales.
+- **13px minimum font** across the whole dashboard (chart axes, legends, captions, widget labels); long chart labels are wrapped onto at most two lines rather than shrunk.
 
 ## Project Structure
 
@@ -97,6 +104,7 @@ synthetic-hospital-db/
 ├── requirements.txt
 ├── LICENSE                  # MIT
 ├── .gitignore
+├── .devcontainer/           # GitHub Codespaces config — installs deps and launches the dashboard
 ├── data/                    # schema + constraint-aware generator (the "acquisition" step for synthetic data)
 │   ├── hospital_db.sql
 │   ├── hospital_generator.py
@@ -117,10 +125,10 @@ There are no external data sources — every row is synthetically generated (see
 
 ## Status & Limitations
 
-- **Done**: schema + constraint-aware generator, validation/repair pipeline (validated at 3 scales), CSV export, 5-page dashboard (browser-verified), 2 executed notebooks.
+- **Done**: schema + constraint-aware generator, validation/repair pipeline (validated at 3 scales), CSV export, 5-page dashboard (browser-verified, [deployed on Streamlit Community Cloud](https://synthetic-hospital-db.streamlit.app/)), 2 executed notebooks.
 - **Known, disclosed residual violations** (not bugs): room-type scarcity in thin departments at small scale, and a rare double-`Newborn`-admission edge case — both explained in [docs/METHODOLOGY.md](docs/METHODOLOGY.md#results-across-scale).
 - **Not automated**: the generate → repair → export cycle is run manually (see Quick Start); there's no CI/scheduled job re-running it.
-- **Not deployed**: the dashboard runs locally (`streamlit run app/app.py`); it hasn't yet been pushed to Streamlit Community Cloud.
+- **Dashboard data is a static snapshot**: the deployed app reads the CSVs committed in `app/data/`, so it only changes when `src/export_to_csv.py` is re-run and the result is pushed — there is no live database behind it.
 - **Financial reconciliation is repair-only, not prevented at generation** — `billing_line_items` totals are reconciled to `billing.total_amount` entirely in the repair step; see the Known Limitations section of [docs/METHODOLOGY.md](docs/METHODOLOGY.md#known-limitations) for why this was left out of scope for the generator patch.
 
 ## License

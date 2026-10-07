@@ -41,8 +41,8 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- departments
 -- Hospital department catalog. Referenced by almost every other table.
 -- bed_capacity drives hospital size configuration in the Python generators.
--- NOTE: head_doctor_id is intentionally excluded from v1 to avoid a circular
---       dependency. Add via ALTER TABLE after doctors are populated in v2.
+-- NOTE: head_doctor_id is intentionally excluded to avoid a circular
+--       dependency (doctors reference departments).
 -- -----------------------------------------------------------------------------
 CREATE TABLE departments (
     department_id       VARCHAR(10)     NOT NULL,
@@ -315,7 +315,7 @@ CREATE INDEX idx_rooms_status       ON rooms (status);
 --   Discharged = complete
 --   Cancelled  = appointment or elective admission cancelled
 -- room_id and discharge_date are nullable to support Scheduled records.
--- length_of_stay is stored (redundant with date diff) for Tableau performance.
+-- length_of_stay is stored (redundant with date diff) for dashboard query performance.
 -- -----------------------------------------------------------------------------
 CREATE TABLE admissions (
     admission_id            VARCHAR(15)     NOT NULL,
@@ -451,8 +451,8 @@ CREATE INDEX idx_triage_admission   ON triage (admission_id);
 -- diagnoses
 -- ICD-10 coded diagnoses linked to an admission.
 -- One admission can have multiple diagnoses (Primary, Secondary, etc).
--- icd10_code populated from icd10_diagnoses.py.
--- common_name column added in v2 via ALTER TABLE.
+-- icd10_code populated from icd10_diagnoses.py; human-readable names are
+-- joined at the dashboard layer from app/data/icd10_lookup.csv.
 -- -----------------------------------------------------------------------------
 CREATE TABLE diagnoses (
     diagnosis_id        VARCHAR(15)     NOT NULL,
@@ -480,7 +480,7 @@ CREATE TABLE diagnoses (
 ENGINE = InnoDB
 DEFAULT CHARSET = utf8mb4
 COLLATE = utf8mb4_unicode_ci
-COMMENT = 'ICD-10 diagnoses per admission — v2 adds common_name column';
+COMMENT = 'ICD-10 diagnoses per admission';
 
 CREATE INDEX idx_dx_admission       ON diagnoses (admission_id);
 CREATE INDEX idx_dx_icd10           ON diagnoses (icd10_code);
@@ -677,7 +677,8 @@ CREATE INDEX idx_shift_date         ON staff_shifts (shift_date);
 -- billing
 -- One bill per admission (enforced by UNIQUE on admission_id).
 -- total_amount should equal the sum of billing_line_items.total_cost —
---   enforce this in the Python generator rather than a trigger in v1.
+--   enforce this in the Python pipeline (reconciled by repair_financial() in
+--   src/validate_repair.py) rather than a trigger.
 -- patient_responsibility = total_amount - insurance_covered
 -- -----------------------------------------------------------------------------
 CREATE TABLE billing (

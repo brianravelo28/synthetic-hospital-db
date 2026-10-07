@@ -53,8 +53,9 @@ Residual violations at every scale are two disclosed, structural edge cases, not
 
 ## Downstream pipeline
 
-- `src/export_to_csv.py` exports the repaired database to `app/data/` so the dashboard (`app/`) never needs a live database connection — it works identically locally and once deployed to Streamlit Community Cloud, which can't reach a local MySQL instance.
+- `src/export_to_csv.py` exports the repaired database to `app/data/` so the dashboard (`app/`) never needs a live database connection — it works identically locally and on Streamlit Community Cloud (live at [synthetic-hospital-db.streamlit.app](https://synthetic-hospital-db.streamlit.app/)), which can't reach a local MySQL instance. The shipped CSVs are from a large-scale regeneration that ended at 19 residual violations (all the newborn `registered_date` case below), slightly different from the 22 in the results table above — exact counts shift by a few between regenerations.
 - The dashboard's color system (`app/utils.py`) assigns colors by category identity, not chart-local rank or hue-cycling, and separates true evaluative "status" colors (e.g. payment status, discharge disposition) from plain categorical identity and from ordinal severity scales (`patient_condition`, test result severity) — see the module for the specific mappings.
+- Layout conventions, also in `app/utils.py`: a 13px minimum font everywhere (chart text via `PLOTLY_LAYOUT`/`AXIS_STYLE`, Streamlit's own captions and labels via injected CSS); long chart labels wrapped to at most two lines by `wrap_label()` rather than shrunk; and KPI stat-tile cards via `render_kpi_row()`, positioned identically on every page (Admissions & Census reserves the KPI slot above its filters, then fills it once the filtered values are known).
 
 ## Known limitations
 

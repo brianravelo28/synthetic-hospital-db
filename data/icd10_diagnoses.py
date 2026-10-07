@@ -3,10 +3,10 @@ icd10_diagnoses.py
 ------------------
 Curated ICD-10 diagnosis list for synthetic hospital database generation.
 
-Covers 70 common inpatient diagnoses across 11 clinical categories.
+Covers 66 common inpatient diagnoses across 13 clinical categories.
 Each entry includes:
     - icd10_code     : Standard ICD-10-CM code
-    - diagnosis_name : Clinical name (common_name field added in v2)
+    - diagnosis_name : Clinical name
     - departments    : List of departments where this diagnosis typically appears
     - weight         : Relative prevalence for weighted random sampling
                        Weights are proportional to real US inpatient admission
@@ -566,7 +566,7 @@ def get_codes_and_names() -> tuple:
 CATEGORY_SUMMARY = {
     "Cardiovascular":               7,
     "Respiratory":                  5,
-    "Endocrine / Metabolic":        6,
+    "Endocrine / Metabolic":        7,
     "Infectious Disease / Sepsis":  5,
     "Gastrointestinal":             7,
     "Renal":                        3,
@@ -579,7 +579,7 @@ CATEGORY_SUMMARY = {
     "Newborn":                      2,
 }
 
-TOTAL_DIAGNOSES = sum(CATEGORY_SUMMARY.values())  # 70
+TOTAL_DIAGNOSES = sum(CATEGORY_SUMMARY.values())  # 66 (matches len(DIAGNOSES))
 
 
 if __name__ == "__main__":
