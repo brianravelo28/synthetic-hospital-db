@@ -1,5 +1,7 @@
 # Synthetic Hospital Database
 
+![Hospital Operations dashboard](docs/screenshot.png)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Live Demo](https://img.shields.io/badge/dashboard-Live%20Demo-FF4B4B.svg?logo=streamlit&logoColor=white)](https://synthetic-hospital-db.streamlit.app/)
