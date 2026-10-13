@@ -284,7 +284,7 @@ CHART_HINT = "Drag to zoom · double-click to reset"
 def plot(fig, hint: bool = True) -> None:
     """Render a Plotly figure with the standing drag-to-zoom / double-click-to-reset
     hint underneath (pass hint=False for charts that can't zoom, e.g. donuts)."""
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
     if hint:
         st.caption(CHART_HINT)
 

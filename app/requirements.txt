@@ -1,3 +1,5 @@
-streamlit>=1.36
-pandas>=2.0
-plotly>=5.20
+# What Streamlit Community Cloud installs for the deployed dashboard.
+# Same exact versions as ../requirements.txt.
+streamlit==1.65.0
+pandas==3.0.6
+plotly==7.1.0

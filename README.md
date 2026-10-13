@@ -5,7 +5,7 @@
 ![Data Quality page — the 51 checks, before vs after repair](docs/screenshot_data_quality.png)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Live Demo](https://img.shields.io/badge/dashboard-Live%20Demo-FF4B4B.svg?logo=streamlit&logoColor=white)](https://synthetic-hospital-db.streamlit.app/)
 
 **[Live Demo →](https://synthetic-hospital-db.streamlit.app/)**
@@ -148,7 +148,7 @@ There are no external data sources — every row is synthetically generated (see
 ## Status & Limitations
 
 - **Done**: schema + constraint-aware generator, 51-check validation + repair (recorded at 3 scales), one-command pipeline, CSV export, 6-page dashboard ([deployed on Streamlit Community Cloud](https://synthetic-hospital-db.streamlit.app/)), tests, 2 executed notebooks.
-- **CI**: `.github/workflows/ci.yml` runs the unit and shipped-data tests on Python 3.11 and the full pipeline against a MariaDB 10.4 service container; both jobs pass. Local development was on Python 3.9 on one Windows machine.
+- **CI and versions**: `.github/workflows/ci.yml` runs the unit and shipped-data tests on Python 3.11 and the full pipeline against a MariaDB 10.4 service container; both jobs pass. Dependencies are pinned to exact versions (`requirements.txt`, `app/requirements.txt`), tested together on Python 3.11 — pandas 3 requires 3.11 or newer. Development before that was on Python 3.9 on one Windows machine, which the pins no longer support.
 - **The checks measure consistency with rules I wrote, not clinical realism.** Groups 1–6 were written alongside the generator; Group 7 was added afterwards, but it is still my idea of what "wrong" looks like. Medications, procedures and diagnoses, for example, are still drawn independently of one another, and ages follow a hand-set curve rather than a real population.
 - **Known residual violation**: a department with no room type suited to a patient's condition (small/medium scale). Repair downgrades the recorded condition rather than invent a room.
 - **Hospital is mostly empty**: 12,000 admissions over ~6.7 years is about 5 a day, so the census (currently admitted) is small relative to 560 rooms. That is arithmetic, not a bug, but it is not a realistic occupancy.

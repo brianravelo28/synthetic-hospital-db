@@ -1,14 +1,18 @@
+# Exact versions, tested together on Python 3.11 (CI + a clean venv; all six
+# dashboard pages render with no exceptions). Bump deliberately, then re-run
+# `pytest` and the dashboard.
+
 # Data generation & pipeline (data/, src/)
-sqlalchemy>=2.0
-pymysql>=1.1
-faker>=15.0
-numpy>=1.24
-pandas>=2.0
+sqlalchemy==2.1.4
+pymysql==1.2.3
+faker==40.43.0
+numpy==2.4.6
+pandas==3.0.6
 
 # Dashboard (app/)
-streamlit>=1.36
-plotly>=5.14
+streamlit==1.65.0
+plotly==7.1.0
 
 # Notebooks (notebooks/)
-jupyter>=1.0
-matplotlib>=3.7
+jupyter==1.1.1
+matplotlib==3.11.2

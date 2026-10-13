@@ -159,7 +159,7 @@ runs_view = runs.assign(
     "violations_before_repair": "Before repair", "violations_after_repair": "After repair",
     "generated_at_utc": "Run (UTC)",
 })
-st.dataframe(runs_view, hide_index=True, use_container_width=True)
+st.dataframe(runs_view, hide_index=True, width="stretch")
 st.caption("Each row is the most recent recorded run at that scale; exact counts shift by a few between regenerations.")
 
 st.divider()
@@ -198,7 +198,7 @@ st.dataframe(
         "group_short": "Group", "rule": "Check", "what": "What it catches",
         "before_repair": "Before repair", "after_repair": "After repair",
     }),
-    hide_index=True, use_container_width=True,
+    hide_index=True, width="stretch",
 )
 
 st.info(
