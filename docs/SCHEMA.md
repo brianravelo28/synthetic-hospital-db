@@ -85,7 +85,8 @@ Validation outputs written alongside them by `src/run_pipeline.py` (read by the 
 
 | File | Contents |
 |---|---|
-| `validation_report.csv` | One row per check (51): group, rule, violations before repair, violations after repair |
+| `validation_report.csv` | One row per check (57): group, rule, violations before repair, violations after repair |
 | `validation_report_meta.json` | Scale, run time, admission count, totals |
 | `validation_runs.csv` | One line per scale (small / medium / large): the latest recorded run |
 | `validation_baseline_pre_fix.csv` | The 51 checks run against the dataset produced *before* the realism fixes (a fixed historical artifact, not regenerated) |
+| `validation_baseline_pre_coherence.csv` | The six Group 8 clinical-coherence checks run against the large dataset produced *before* treatments followed diagnoses (4,699 violations; a fixed historical artifact) |

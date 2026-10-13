@@ -12,24 +12,25 @@
 
 *The app runs on Streamlit's free tier and sleeps when idle — if you see a "This app has gone to sleep" screen, click **Yes, get this app back up!** and give it a few seconds.*
 
-**100% synthetic — no real patient data.** A constraint-aware generator for a fully-relational 17-table hospital database (MySQL/MariaDB), a 51-check validation suite with an automatic repair step, and a 6-page dashboard built on top of it — including a Data Quality page that shows the validation results. Built to demonstrate data-engineering and data-quality thinking, not to model any real institution — see [Data Sources & References](docs/CITATIONS.md#synthetic-data-disclosure) for the full disclosure.
+**100% synthetic — no real patient data.** A constraint-aware generator for a fully-relational 17-table hospital database (MySQL/MariaDB), a 57-check validation suite with an automatic repair step, and a 6-page dashboard built on top of it — including a Data Quality page that shows the validation results. Built to demonstrate data-engineering and data-quality thinking, not to model any real institution — see [Data Sources & References](docs/CITATIONS.md#synthetic-data-disclosure) for the full disclosure.
 
 ## Overview
 
-Most synthetic-data generators produce rows that are individually plausible but collectively wrong: a newborn admitted to Cardiology, a male patient diagnosed with a pregnancy complication, a bill dated before the discharge it covers, a doctor treating patients before they were hired. This project builds a generator that avoids those violations *at generation time*, checks the result with a 51-rule validator, repairs what slips through, and records — with real numbers — what each stage did.
+Most synthetic-data generators produce rows that are individually plausible but collectively wrong: a newborn admitted to Cardiology, a male patient diagnosed with a pregnancy complication, a bill dated before the discharge it covers, a doctor treating patients before they were hired. This project builds a generator that avoids those violations *at generation time*, checks the result with a 57-rule validator, repairs what slips through, and records — with real numbers — what each stage did.
 
 **Real, verified results:**
 - 🏥 **17-table relational schema**: departments, staff, patients, admissions, clinical records, and billing — full FK graph, `CHECK` constraints, one polymorphic reference pattern (`staff_shifts.staff_id`)
 - 🐛 **A real bug found and fixed**: at small scale, 10 of 20 departments ended up with zero doctors — making a whole violation category *permanently unrepairable*. See [docs/METHODOLOGY.md](docs/METHODOLOGY.md#a-fifth-bug-found-by-testing-at-small-scale).
 - 🔍 **The validator was not independent, so I added checks that were**: the original six check groups were written alongside the generator, which was then built to satisfy them — on the generator's earlier output they reported **19** violations. Sixteen realism checks added afterwards (Group 7) found **59,105** in that same dataset: 2,409 patients "currently admitted" (one since 2020), bill lines pointing at other patients' procedures, doctors treating before they were hired. Every one was then fixed in the generator, and the checks now pass on fresh data. See [docs/METHODOLOGY.md](docs/METHODOLOGY.md#second-round-independent-checks).
-- 🕰️ **Measured against the old generator**: the archived pre-patch generator produced **99,532** violations at large scale (against today's 51 checks), and its output couldn't even be repaired — the repair step crashes on a `CHECK` constraint. The current generator produces 58. See [docs/METHODOLOGY.md](docs/METHODOLOGY.md#round-one-what-was-actually-broken).
+- 🩺 **Treatments now follow the diagnosis**: procedures, medications and tests used to be drawn at random, so a delivery could land on a male patient and chemotherapy on someone with no cancer diagnosis — **4,699** such contradictions across six checks (Group 8) in the earlier large dataset. The generator now picks treatments from each admission's own diagnoses and the patient's sex and age (`data/clinical_rules.py`); the same six checks find **0** at all three scales. The mapping is coarse and hand-built — it removes contradictions, it is not clinical guidance. See [docs/METHODOLOGY.md](docs/METHODOLOGY.md#third-round-clinical-coherence).
+- 🕰️ **Measured against the old generator**: the archived pre-patch generator produced **99,532** violations at large scale (against the 51 checks that existed then), and its output couldn't even be repaired — the repair step crashes on a `CHECK` constraint. The current generator produces 65 (of 57 checks). See [docs/METHODOLOGY.md](docs/METHODOLOGY.md#round-one-what-was-actually-broken).
 - 📉 **What each stage leaves behind**, latest recorded run at each scale — "before repair" is what the generator produced by itself:
 
   | Scale | Admissions | Violations before repair | After repair |
   |---|---|---|---|
-  | Small | 800 | 183 | 61 |
-  | Medium | 3,200 | 79 | 37 |
-  | Large | 12,000 | 58 | 0 |
+  | Small | 800 | 194 | 67 |
+  | Medium | 3,200 | 83 | 2 |
+  | Large | 12,000 | 65 | 0 |
 
   What remains at small/medium is one known case — a department with no room suited to a patient's condition. (Earlier versions of this README reported "25,720 → 22" at large scale; roughly 99.7% of that was repair clearing groups the generator didn't yet prevent. The generator now prevents them, so this table no longer flatters repair.)
 
@@ -104,7 +105,7 @@ jupyter notebook notebooks/
 | **Clinical** | Top diagnoses (ICD-10, human-readable names), diagnoses by department, top procedures/medications, test result severity mix |
 | **Staffing** | Headcount by department (doctor/nurse/employee), doctor specialties, shift-type distribution, hires per year |
 | **Financials** | Revenue by payer type, payment status mix, billing line items by type, avg. bill by admission type, revenue trend |
-| **Data Quality** | The 51 checks and their results: violations by group before vs. after repair, results at each scale, what the independent checks found in the pre-fix data, and every rule with a plain-language description |
+| **Data Quality** | The 57 checks and their results: violations by group before vs. after repair, results at each scale, what the independent checks found in the pre-fix data, the clinical-coherence before/after, and every rule with a plain-language description |
 
 Design notes (all in `app/utils.py`):
 - **KPI stat-tile cards** lead every page, and sit in the same position on each one — on Admissions & Census the KPI row is reserved above the filters and fills in once they're applied.
@@ -129,6 +130,7 @@ synthetic-hospital-db/
 │   ├── hospital_db.sql
 │   ├── hospital_generator.py
 │   ├── shared_rules.py        # constants + reference date shared by generator and validator
+│   ├── clinical_rules.py      # diagnosis -> procedures / drugs / tests, with patient eligibility
 │   └── icd10_diagnoses.py
 ├── src/                     # pipeline: validation/repair, CSV export, one-command runner
 │   ├── validate_repair.py
@@ -148,9 +150,9 @@ There are no external data sources — every row is synthetically generated (see
 
 ## Status & Limitations
 
-- **Done**: schema + constraint-aware generator, 51-check validation + repair (recorded at 3 scales), one-command pipeline, CSV export, 6-page dashboard ([deployed on Streamlit Community Cloud](https://synthetic-hospital-db.streamlit.app/)), tests, 2 executed notebooks.
+- **Done**: schema + constraint-aware generator, 57-check validation + repair (recorded at 3 scales), one-command pipeline, CSV export, 6-page dashboard ([deployed on Streamlit Community Cloud](https://synthetic-hospital-db.streamlit.app/)), tests, 2 executed notebooks.
 - **CI and versions**: `.github/workflows/ci.yml` runs the unit and shipped-data tests on Python 3.11 and the full pipeline against a MariaDB 10.4 service container; both jobs pass. Dependencies are pinned to exact versions (`requirements.txt`, `app/requirements.txt`), tested together on Python 3.11 — pandas 3 requires 3.11 or newer. Development before that was on Python 3.9 on one Windows machine, which the pins no longer support.
-- **The checks measure consistency with rules I wrote, not clinical realism.** Groups 1–6 were written alongside the generator; Group 7 was added afterwards, but it is still my idea of what "wrong" looks like. Medications, procedures and diagnoses, for example, are still drawn independently of one another, and ages follow a hand-set curve rather than a real population.
+- **The checks measure consistency with rules I wrote, not clinical realism.** Groups 1–6 were written alongside the generator; Groups 7 and 8 were added afterwards, but they are still my idea of what "wrong" looks like. Group 8 catches six hard contradictions between a patient, their diagnoses and their treatments; the diagnosis-to-treatment mapping behind it is a coarse, hand-built table, so an odd-but-not-contradictory pairing can still occur. Ages follow a hand-set curve rather than a real population.
 - **Known residual violation**: a department with no room type suited to a patient's condition (small/medium scale). Repair downgrades the recorded condition rather than invent a room.
 - **Hospital is mostly empty**: 12,000 admissions over ~6.7 years is about 5 a day, so the census (currently admitted) is small relative to 560 rooms. That is arithmetic, not a bug, but it is not a realistic occupancy.
 - **Patient columns like SSN, phone, email and address** are included in `app/data/patients.csv`. They are Faker-generated placeholders (like everything else here), the dashboard doesn't read them, and they're kept deliberately as part of the realistic-looking schema.

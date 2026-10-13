@@ -1,0 +1,7 @@
+group,group_label,rule,count
+group8_clinical,Group 8 — Clinical Coherence (detect-only),delivery_wrong_patient,711
+group8_clinical,Group 8 — Clinical Coherence (detect-only),delivery_without_obstetric_dx,879
+group8_clinical,Group 8 — Clinical Coherence (detect-only),adult_surgery_on_minor,306
+group8_clinical,Group 8 — Clinical Coherence (detect-only),cancer_treatment_without_cancer_dx,680
+group8_clinical,Group 8 — Clinical Coherence (detect-only),diabetes_drug_without_diabetes_dx,1643
+group8_clinical,Group 8 — Clinical Coherence (detect-only),pap_smear_wrong_patient,480

@@ -35,8 +35,8 @@ def result(tmp_path_factory):
     return {"meta": meta, "out": out, "report": pd.read_csv(out / "report.csv")}
 
 
-def test_all_51_checks_ran(result):
-    assert result["meta"]["checks"] == len(result["report"]) == 51
+def test_all_57_checks_ran(result):
+    assert result["meta"]["checks"] == len(result["report"]) == 57
 
 
 def test_generator_prevents_admission_type_and_financial_violations(result):
@@ -44,6 +44,12 @@ def test_generator_prevents_admission_type_and_financial_violations(result):
     r = result["report"]
     for group in ("group3_admission_type", "group6_financial"):
         assert r.loc[r["group"] == group, "before_repair"].sum() == 0, group
+
+
+def test_treatments_fit_the_patient_and_diagnosis_before_any_repair(result):
+    """Group 8 has no repair, so the generator alone must keep it at zero."""
+    r = result["report"]
+    assert r.loc[r["group"] == "group8_clinical", "before_repair"].sum() == 0
 
 
 def test_repair_leaves_only_room_scarcity(result):

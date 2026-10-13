@@ -1029,6 +1029,63 @@ def validate_realism(conn) -> dict:
     }
 
 
+def validate_clinical_coherence(conn) -> dict:
+    """
+    Group 8 — do procedures, medications and tests make sense for the patient and
+    their diagnoses? Detect-only, and deliberately independent of the generator's
+    diagnosis-to-treatment mapping (data/clinical_rules.py): these are a handful
+    of hard contradictions written from clinical common sense (CPT codes and drug
+    names, not the generator's procedure ids), not the generator's own rules.
+    Ages are at admission, from birth_date, not the stored snapshot.
+    """
+    age_at_adm = "TIMESTAMPDIFF(YEAR, p.birth_date, DATE(a.admission_date))"
+    delivery   = "pr.procedure_code IN ('59400', '59510')"        # vaginal / cesarean delivery
+    return {
+        'delivery_wrong_patient': _count(conn, f"""
+            SELECT COUNT(*) FROM patient_procedures pp
+            JOIN procedures pr ON pr.procedure_id = pp.procedure_id
+            JOIN admissions a  ON a.admission_id  = pp.admission_id
+            JOIN patients p    ON p.patient_id    = a.patient_id
+            WHERE {delivery}
+              AND (p.gender <> 'F' OR {age_at_adm} NOT BETWEEN 12 AND 55)
+        """),
+        'delivery_without_obstetric_dx': _count(conn, f"""
+            SELECT COUNT(*) FROM patient_procedures pp
+            JOIN procedures pr ON pr.procedure_id = pp.procedure_id
+            WHERE {delivery}
+              AND NOT EXISTS (SELECT 1 FROM diagnoses d
+                              WHERE d.admission_id = pp.admission_id AND d.icd10_code LIKE 'O%')
+        """),
+        'adult_surgery_on_minor': _count(conn, f"""
+            SELECT COUNT(*) FROM patient_procedures pp
+            JOIN procedures pr ON pr.procedure_id = pp.procedure_id
+            JOIN admissions a  ON a.admission_id  = pp.admission_id
+            JOIN patients p    ON p.patient_id    = a.patient_id
+            WHERE pr.procedure_code IN ('33533', '27130', '27447', '27236')   -- CABG, hip/knee replacement, hip fracture fixation
+              AND {age_at_adm} < 18
+        """),
+        'cancer_treatment_without_cancer_dx': _count(conn, """
+            SELECT COUNT(*) FROM patient_procedures pp
+            JOIN procedures pr ON pr.procedure_id = pp.procedure_id
+            WHERE pr.procedure_code IN ('96413', '77373')                    -- chemotherapy, stereotactic radiation
+              AND NOT EXISTS (SELECT 1 FROM diagnoses d
+                              WHERE d.admission_id = pp.admission_id AND d.icd10_code LIKE 'C%')
+        """),
+        'diabetes_drug_without_diabetes_dx': _count(conn, """
+            SELECT COUNT(*) FROM medications m
+            WHERE (m.drug_name LIKE 'Insulin%' OR m.drug_name = 'Metformin')
+              AND NOT EXISTS (SELECT 1 FROM diagnoses d
+                              WHERE d.admission_id = m.admission_id AND d.icd10_code REGEXP '^E1[0-4]')
+        """),
+        'pap_smear_wrong_patient': _count(conn, f"""
+            SELECT COUNT(*) FROM medical_tests t
+            JOIN admissions a ON a.admission_id = t.admission_id
+            JOIN patients p   ON p.patient_id   = a.patient_id
+            WHERE t.test_name = 'Pap Smear' AND (p.gender <> 'F' OR {age_at_adm} < 21)
+        """),
+    }
+
+
 # =============================================================================
 # MAIN VALIDATE / REPAIR FUNCTIONS
 # =============================================================================
@@ -1046,6 +1103,7 @@ def validate_all(conn) -> dict:
         'group5_diagnoses':       validate_diagnoses(conn),
         'group6_financial':       validate_financial(conn),
         'group7_realism':         validate_realism(conn),
+        'group8_clinical':        validate_clinical_coherence(conn),
     }
 
 
@@ -1057,6 +1115,7 @@ GROUP_LABELS = {
     'group5_diagnoses':      'Group 5 — Diagnosis Alignment',
     'group6_financial':      'Group 6 — Financial',
     'group7_realism':        'Group 7 — Operational Realism (detect-only)',
+    'group8_clinical':       'Group 8 — Clinical Coherence (detect-only)',
 }
 
 

@@ -32,6 +32,8 @@ def d():
         "billing": load("billing", ["bill_date"]),
         "items": load("billing_line_items"),
         "pp": load("patient_procedures"),
+        "procedures": load("procedures"),
+        "meds": load("medications"),
         "tests": load("medical_tests"),
         "dx": load("diagnoses", ["diagnosis_date"]),
         "doctors": load("doctors", ["hire_date", "birth_date"]),
@@ -56,7 +58,7 @@ def test_foreign_keys_resolve(d):
 
 def test_recorded_validation_run_is_clean_apart_from_room_scarcity(d):
     r = d["report"]
-    assert len(r) == 51
+    assert len(r) == 57
     leftover = r[r["after_repair"] > 0]
     assert set(leftover["rule"]) <= {"condition_room_mismatch"}
 
@@ -127,3 +129,54 @@ def test_doctors_are_hired_before_acting_and_not_too_young(d):
     for key in ("doctors", "nurses"):
         age_at_hire = (d[key]["hire_date"] - d[key]["birth_date"]).dt.days / 365.25
         assert (age_at_hire >= 21).all(), key
+
+
+# ── clinical coherence (pandas versions of validator Group 8) ────────────
+
+def _age_at_admission(adm, patients):
+    m = adm.merge(patients[["patient_id", "gender", "birth_date"]], on="patient_id")
+    m["age_at_adm"] = ((m["admission_date"].dt.normalize() - m["birth_date"]).dt.days // 365.25).astype(int)
+    return m[["admission_id", "gender", "age_at_adm"]]
+
+
+def _procs(d):
+    pp = d["pp"].merge(d["procedures"][["procedure_id", "procedure_code"]], on="procedure_id")
+    pp["procedure_code"] = pp["procedure_code"].astype(str)
+    return pp.merge(_age_at_admission(d["admissions"], d["patients"]), on="admission_id")
+
+
+def test_deliveries_only_for_women_of_childbearing_age_with_an_obstetric_diagnosis(d):
+    deliveries = _procs(d)[lambda x: x["procedure_code"].isin(["59400", "59510"])]
+    assert len(deliveries) > 0
+    assert (deliveries["gender"] == "F").all()
+    assert deliveries["age_at_adm"].between(12, 55).all()
+    obstetric = set(d["dx"].loc[d["dx"]["icd10_code"].str.startswith("O"), "admission_id"])
+    assert deliveries["admission_id"].isin(obstetric).all()
+
+
+def test_no_major_adult_surgery_on_minors(d):
+    surgery = _procs(d)[lambda x: x["procedure_code"].isin(["33533", "27130", "27447", "27236"])]
+    assert len(surgery) > 0
+    assert (surgery["age_at_adm"] >= 18).all()
+
+
+def test_cancer_treatment_only_with_a_cancer_diagnosis(d):
+    cancer_tx = _procs(d)[lambda x: x["procedure_code"].isin(["96413", "77373"])]
+    assert len(cancer_tx) > 0
+    cancer = set(d["dx"].loc[d["dx"]["icd10_code"].str.startswith("C"), "admission_id"])
+    assert cancer_tx["admission_id"].isin(cancer).all()
+
+
+def test_diabetes_drugs_only_with_a_diabetes_diagnosis(d):
+    meds = d["meds"]
+    diabetes_drugs = meds[meds["drug_name"].str.startswith("Insulin") | (meds["drug_name"] == "Metformin")]
+    assert len(diabetes_drugs) > 0
+    diabetic = set(d["dx"].loc[d["dx"]["icd10_code"].str.match(r"^E1[0-4]"), "admission_id"])
+    assert diabetes_drugs["admission_id"].isin(diabetic).all()
+
+
+def test_pap_smears_only_for_women_21_and_over(d):
+    paps = d["tests"][d["tests"]["test_name"] == "Pap Smear"].merge(
+        _age_at_admission(d["admissions"], d["patients"]), on="admission_id")
+    assert len(paps) > 0
+    assert (paps["gender"] == "F").all() and (paps["age_at_adm"] >= 21).all()

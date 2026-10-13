@@ -77,6 +77,13 @@ RULE_DESCRIPTIONS = {
     "staff_hired_before_age_21": "Doctor or nurse hired before turning 21",
     "staff_event_before_hire": "Doctor or nurse recorded acting before their hire date",
     "shift_before_hire_or_wrong_dept": "Shift before the staff member's hire date, or outside their own department",
+    # Group 8 — clinical coherence
+    "delivery_wrong_patient": "A delivery procedure on a patient who is not female or not of childbearing age (12-55)",
+    "delivery_without_obstetric_dx": "A delivery procedure on an admission with no obstetric diagnosis",
+    "adult_surgery_on_minor": "Bypass surgery, hip/knee replacement or hip-fracture fixation on a patient under 18",
+    "cancer_treatment_without_cancer_dx": "Chemotherapy or radiation on an admission with no cancer diagnosis",
+    "diabetes_drug_without_diabetes_dx": "Insulin or metformin on an admission with no diabetes diagnosis",
+    "pap_smear_wrong_patient": "A Pap smear on a patient who is not female or is under 21",
 }
 
 GROUP_SHORT = {
@@ -87,19 +94,21 @@ GROUP_SHORT = {
     "group5_diagnoses": "5 · Diagnoses",
     "group6_financial": "6 · Financial",
     "group7_realism": "7 · Realism (detect-only)",
+    "group8_clinical": "8 · Clinical coherence (detect-only)",
 }
 
 GRAY = "#b9b8b0"   # de-emphasis tone for the "before" bars
 
 val = load_validation()
 report, meta, runs, baseline = val["report"], val["meta"], val["runs"], val["baseline"]
+baseline_clinical = val["baseline_clinical"]
 
 report["group_short"] = report["group"].map(GROUP_SHORT)
 report["what"] = report["rule"].map(RULE_DESCRIPTIONS).fillna("")
 
 st.title("🧪 Data Quality")
 st.caption(
-    f"{len(report)} automated checks in 7 groups, run after every generation. "
+    f"{len(report)} automated checks in 8 groups, run after every generation. "
     f"Showing the latest run: **{meta['size']}** scale, {fmt_count(meta['admissions'])} admissions."
 )
 
@@ -115,8 +124,9 @@ st.markdown(
     "The generator is built to avoid violations in the first place; a repair step then fixes whatever "
     "slips through. **Before repair** is what the generator itself produced; **after repair** is what "
     "is left in the dataset behind this dashboard. Groups 1–6 were written alongside the generator. "
-    "**Group 7 was added afterwards and deliberately not designed around** — it only reports, because "
-    "repairing e.g. a bill line that points at the wrong patient's procedure would mean inventing data."
+    "**Groups 7 and 8 were added afterwards and deliberately not designed around** — they only report, "
+    "because repairing e.g. a bill line that points at the wrong patient's procedure would mean "
+    "inventing data."
 )
 st.divider()
 
@@ -188,6 +198,36 @@ plot(fig)
 
 st.divider()
 
+# ── Clinical coherence: before / after the diagnosis-linked generator ────
+st.subheader("Do the treatments fit the patient and the diagnosis?")
+clin = baseline_clinical.rename(columns={"count": "before"}).merge(
+    report[["rule", "before_repair"]].rename(columns={"before_repair": "now"}), on="rule", how="left"
+)
+st.markdown(
+    f"Procedures, medications and tests used to be drawn at random, independent of each other and of "
+    f"the patient. Six hard contradictions (a delivery on a male patient, chemotherapy with no cancer "
+    f"diagnosis, insulin with no diabetes) showed up **{fmt_count(clin['before'].sum())}** times in the "
+    f"earlier large dataset. The generator now chooses treatments from each admission's own diagnoses "
+    f"and the patient's sex and age; the same six checks find **{fmt_count(clin['now'].sum())}** now. "
+    f"The checks are written from CPT codes and drug names, separately from the generator's mapping."
+)
+cl = clin.melt(id_vars="rule", value_vars=["before", "now"], var_name="stage", value_name="violations")
+cl["stage"] = cl["stage"].map({"before": "Earlier generator", "now": "Current generator"})
+order = clin.sort_values("before")["rule"].tolist()
+fig = px.bar(
+    cl, x="violations", y="rule", color="stage", orientation="h", barmode="group",
+    color_discrete_map={"Earlier generator": GRAY, "Current generator": CATEGORICAL[0]},
+    category_orders={"stage": ["Earlier generator", "Current generator"], "rule": order},
+)
+fig.update_traces(texttemplate="%{x:,}", textposition="outside", cliponaxis=False)   # label the zeros too
+fig.update_layout(**PLOTLY_LAYOUT, xaxis_title="Violations (large scale, before repair)", yaxis_title="",
+                  height=380, legend_title_text="")
+fig.update_xaxes(**AXIS_STYLE)
+fig.update_yaxes(**AXIS_STYLE)
+plot(fig)
+
+st.divider()
+
 # ── Every rule ────────────────────────────────────────────────────────────
 st.subheader("Every check")
 choice = st.selectbox("Group", ["All groups"] + list(GROUP_SHORT.values()))
@@ -203,6 +243,7 @@ st.dataframe(
 
 st.info(
     "**What this does and doesn't prove.** Zero violations means the data is consistent with these "
-    f"{len(report)} rules, written for this project — not that it is clinically realistic. Medications, "
-    "procedures and diagnoses, for example, are still drawn independently of each other."
+    f"{len(report)} rules, written for this project — not that it is clinically realistic. Group 8 "
+    "catches the clear contradictions only; a medication or procedure can still be an odd choice for a "
+    "diagnosis without breaking any of its six rules."
 )

@@ -1,8 +1,9 @@
 {
   "size": "large",
-  "generated_at_utc": "2026-10-13 12:42",
-  "checks": 51,
-  "violations_before_repair": 58,
+  "generated_at_utc": "2026-10-13 21:00",
+  "as_of": "2026-10-13 12:00:00",
+  "checks": 57,
+  "violations_before_repair": 65,
   "violations_after_repair": 0,
   "admissions": 12000
 }

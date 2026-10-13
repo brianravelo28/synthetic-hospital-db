@@ -239,6 +239,7 @@ def load_validation() -> dict:
         "meta": meta,
         "runs": pd.read_csv(DATA_DIR / "validation_runs.csv"),
         "baseline": pd.read_csv(DATA_DIR / "validation_baseline_pre_fix.csv"),
+        "baseline_clinical": pd.read_csv(DATA_DIR / "validation_baseline_pre_coherence.csv"),
     }
 
 

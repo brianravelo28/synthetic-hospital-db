@@ -23,20 +23,20 @@ Patching things that weren't broken would have wasted the "preventive over react
 
 **4. `gen_billing()`'s `bill_date` ignored `discharge_date`.** *Fix:* anchored to `discharge_date` (+0–90 days).
 
-Items 1–4 were found by reading code and reasoning about what the validator would catch. They were not measured at the time; that has since been done by running the **archived pre-patch generator** (`hospital_generator_legacy.py`, kept outside this repo) through today's 51 checks at all three scales, each in its own process with the same seed. Results are in `docs/validation_runs/legacy_generator_*.csv`. At large scale, before any repair:
+Items 1–4 were found by reading code and reasoning about what the validator would catch. They were not measured at the time; that has since been done by running the **archived pre-patch generator** (`hospital_generator_legacy.py`, kept outside this repo) through the 51 checks that existed then at all three scales, each in its own process with the same seed. Results are in `docs/validation_runs/legacy_generator_*.csv`. At large scale, before any repair:
 
 | Group | Pre-patch generator | Current generator |
 |---|---|---|
 | 1 · Temporal | 1,548 | 0 |
-| 2 · Age-based | 4,250 | 58 |
+| 2 · Age-based | 4,250 | 65 |
 | 3 · Admission type | 14,645 | 0 |
 | 4 · Department | 5,119 | 0 |
 | 5 · Diagnoses | 1,803 | 0 |
 | 6 · Financial | 10,936 | 0 |
 | 7 · Realism (detect-only) | 61,231 | 0 |
-| **Total** | **99,532** | **58** |
+| **Total** | **99,532** | **65** |
 
-(Small: 6,177 → 183. Medium: 25,681 → 79.) This confirms the reasoning above: the round-one patches targeted groups 1, 2, 4 and 5, which together fell from 12,720 violations (1,548 + 4,250 + 5,119 + 1,803) to 58 — while groups 3 and 6 were untouched until round two. It does *not* attribute the improvement to individual patches; only the doctor fix has its own before/after.
+(Small: 6,177 → 194. Medium: 25,681 → 83. The pre-patch column covers the 51 checks that existed then; Group 8 was written later and was not run against that output. The current-generator column is the latest regenerated run, which is why it differs slightly from earlier drafts of this table.) This confirms the reasoning above: the round-one patches targeted groups 1, 2, 4 and 5, which together fell from 12,720 violations (1,548 + 4,250 + 5,119 + 1,803) to 65 — while groups 3 and 6 were untouched until round two. It does *not* attribute the improvement to individual patches; only the doctor fix has its own before/after.
 
 **The old generator's output could not be repaired.** Run through today's `repair_all()`, the pre-patch data makes the repair step crash at every scale: moving a bill's date forward to its discharge date violates the table's own `CHECK (payment_date >= bill_date)` constraint (MariaDB error 4025 on `chk_payment_date`), because those bills had been given payment dates before the discharge they were being moved to. So "after repair" numbers don't exist for it. (The repair code was unchanged in that statement; the current generator never produces the conflicting dates.) This is a measured fact about this repair code on this data, not a claim about what the original author's loop did on their machine.
 
@@ -85,15 +85,41 @@ Two side effects worth knowing:
 - **Groups 3 (admission type) and 6 (financial) are now prevented, not repaired.** Previously ~99.7% of the "before repair" count was those two groups — `Scheduled` admissions that still had clinical rows, and bill totals that never matched their line items — which repair cleared by deleting rows and recomputing. Billing is now generated bottom-up (the total *is* the sum of its line items), and scheduled/cancelled admissions are never given clinical records.
 - **`Newborn` admissions can only occur once per patient**, which removed most of the old "two newborn admissions on different dates" edge case. What remains before repair is patients' `registered_date`, which can't be known when patients are created (they're generated before admissions); repair sets it.
 
+## Third round: clinical coherence
+
+Round two made sure the *dates, counts and money* were consistent. It said nothing about whether a treatment made sense for the patient: procedures, medications and tests were each drawn uniformly at random from their catalogs, independent of the diagnoses and of who the patient was.
+
+**Measured first.** Six clear-cut contradictions were written as a new check group (Group 8, `validate_clinical_coherence()`), then run against the large dataset that was live at the time, before touching the generator:
+
+| Check | Violations | What it caught |
+|---|---|---|
+| `diabetes_drug_without_diabetes_dx` | 1,643 | Insulin or metformin on an admission with no diabetes diagnosis |
+| `delivery_without_obstetric_dx` | 879 | A delivery procedure with no obstetric diagnosis |
+| `delivery_wrong_patient` | 711 | A delivery on a patient who is not female or not aged 12–55 (445 of 907 deliveries were on male patients) |
+| `cancer_treatment_without_cancer_dx` | 680 | Chemotherapy or radiation with no cancer diagnosis (680 of the 839 such procedures) |
+| `pap_smear_wrong_patient` | 480 | A Pap smear on a patient who is not female or is under 21 |
+| `adult_surgery_on_minor` | 306 | Bypass surgery, hip/knee replacement or hip-fracture fixation on a patient under 18 |
+| **Total** | **4,699** | |
+
+(The baseline is kept in `app/data/validation_baseline_pre_coherence.csv`, a fixed historical artifact like the Group 7 baseline.)
+
+**The fix** is `data/clinical_rules.py`: each ICD-10 code maps to a family (cardiac, respiratory, diabetes, oncology, obstetric, …), and each family to the procedures, drugs and tests that plausibly go with it, with code-level overrides where one code is far more specific (appendicitis → appendectomy; type 1 diabetes → insulin only). A fifth of treatments come from a "general care" pool (acetaminophen, a metabolic panel, a ward round) so not everything is diagnosis-driven. Eligibility filters use the patient's sex and **age at admission** (from `birth_date`, not the stored snapshot): deliveries need a female patient of childbearing age, major adult surgery needs an adult, a Pap smear needs a woman of 21 or over, and a few drugs are withheld from young children.
+
+**Why the check isn't just the generator marking its own homework.** Group 8 is written separately, from CPT codes and drug names rather than the generator's procedure ids or its mapping, and it only encodes hard contradictions. The generator's code never reads it, and it is detect-only.
+
+**Result:** 0 violations before repair at all three scales (the integration test asserts this, since Group 8 has no repair to fall back on). The rest of the pipeline is unchanged; the same single scarcity case remains at small and medium scale. Procedure and drug mixes changed accordingly — the old uniform draw gave every procedure about the same share; now chest X-ray, CT, echocardiography and endoscopy lead, and chemotherapy appears only with cancer diagnoses.
+
+**What this does not do.** The mapping is coarse and hand-built, not clinical guidance. Group 8 catches contradictions, not oddness: a drug that fits the family but not the specific condition passes. The diabetes rule is deliberately strict (real hospitals do give insulin to non-diabetic patients with high blood sugar, rarely). Medications and procedures are linked to the diagnoses, not to each other or to timing. Staff attribution is still hospital-wide rather than by department, and `age` on the patient row is still a snapshot (Group 8 uses age at admission instead).
+
 ## Results across scale
 
 Each run: generate, `validate_all()` before any repair, `repair_all()`, `validate_all()` again. "Before repair" is what the generator produced by itself. Per-run reports are in `docs/validation_runs/`; the dashboard's Data Quality page shows them.
 
 | Scale | Admissions | Before repair | After repair | What remains before / after |
 |---|---|---|---|---|
-| Small | 800 | 183 | 61 | 180 room-scarcity + 3 newborn registration dates / room-scarcity only |
-| Medium | 3,200 | 79 | 37 | 64 + 15 / room-scarcity only |
-| Large | 12,000 | 58 | 0 | 58 newborn registration dates / nothing |
+| Small | 800 | 194 | 67 | 192 room-scarcity + 2 newborn registration dates / room-scarcity only |
+| Medium | 3,200 | 83 | 2 | 73 + 10 / room-scarcity only |
+| Large | 12,000 | 65 | 0 | 65 newborn registration dates / nothing |
 
 **Retraction.** Earlier versions of this document and the README reported "25,720 → 22" at large scale and "99.9% eliminated". That was real arithmetic but misleading: it credited the generator for what repair was doing, and the groups the generator patches targeted accounted for only 84 of those violations. The table above is the honest version — and it is better, because the generator now prevents most of what repair used to clear.
 
@@ -112,16 +138,17 @@ The recorded runs above drifted by a few violations between regenerations (e.g. 
 ## Tests
 
 - `tests/test_generator_units.py` — pure logic: age sampling, hire dates, `StaffPool` (nobody acts before being hired), diagnosis sampling never returning impossible codes, age-banded vitals, and that the constants copied between the generator and validator stay identical.
-- `tests/test_validator_and_app.py` — the rule set (51 unique rules, each with a dashboard description) and dashboard helpers.
+- `tests/test_validator_and_app.py` — the rule set (57 unique rules, each with a dashboard description) and dashboard helpers, including the per-chart table views.
+- `tests/test_clinical_rules.py` — the diagnosis-to-treatment mapping: everything it names exists in the catalogs, and the eligibility rules (no deliveries for men, no chemotherapy without cancer, no insulin without diabetes, …) hold over hundreds of seeded draws.
 - `tests/test_shipped_data.py` — pandas re-implementations of the realism rules, run against the CSVs actually shipped in `app/data/`, so a regression is caught without a database. Run against the *pre-fix* CSVs from git history, 8 of its tests fail — i.e. they do detect the original problems.
-- `tests/test_pipeline_integration.py` — the whole pipeline against a real database; asserts all 51 checks run, that groups 3 and 6 have zero violations *before* repair, that only room scarcity remains after, that two runs with the same pinned reference date produce identical tables, and that running repair a second time changes nothing. Runs only when `HOSPITAL_DB_URL` is set, because it regenerates the target database.
+- `tests/test_pipeline_integration.py` — the whole pipeline against a real database; asserts all 57 checks run, that groups 3, 6 and 8 have zero violations *before* repair, that only room scarcity remains after, that two runs with the same pinned reference date produce identical tables, and that running repair a second time changes nothing. Runs only when `HOSPITAL_DB_URL` is set, because it regenerates the target database.
 - `.github/workflows/ci.yml` runs the first three on Python 3.11 and the fourth against a MariaDB 10.4 service container. Both jobs passed on their first run.
 
 ## Known limitations
 
-- **The checks measure consistency with rules the author wrote**, not clinical realism. Medications, procedures and diagnoses are drawn independently of each other (insulin without a diabetes diagnosis, adult doses for infants). Age follows a hand-set curve (`AGE_BANDS`), and vitals ranges are plausible bands, not clinical references.
+- **The checks measure consistency with rules the author wrote**, not clinical realism. The diagnosis-to-treatment mapping is coarse and hand-built (see the third round); Group 8 catches contradictions, not oddness. Age follows a hand-set curve (`AGE_BANDS`), and vitals ranges are plausible bands, not clinical references.
 - **The hospital is mostly empty.** 12,000 admissions across ~6.7 years is ~5 a day with a mean stay of ~5 days, so the true census is a few dozen patients against 560 rooms. Admission *volume* was kept at the original sizes rather than inventing a denser calendar.
-- **Group 7 has no repair**, by design; it only reports.
+- **Groups 7 and 8 have no repair**, by design; they only report.
 - **No live-DB mode** — the dashboard is CSV-only by design; re-run the pipeline after any regeneration and push the result to refresh the deployed app.
 - **Patient SSN/phone/email/address columns are kept in the CSVs** as Faker-generated placeholders; the dashboard doesn't read them.
 - **Staff-to-department rules are strict only where checked**: diagnoses, procedures, medications and tests are attributed to any already-hired doctor in the hospital, not the admission's department.

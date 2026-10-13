@@ -62,6 +62,7 @@ from sqlalchemy import create_engine, text
 from collections import defaultdict
 
 from icd10_diagnoses import sample_diagnosis
+from clinical_rules import pick_medication, pick_procedure, pick_test
 from shared_rules import (
     AS_OF, CONDITION_ROOM_MAP, FEMALE_IMPOSSIBLE_CODES, MALE_IMPOSSIBLE_CODES,
     NEWBORN_ONLY_CODES, OB_NEWBORN_DEPTS, PAYER_COVERAGE,
@@ -1004,13 +1005,14 @@ def _load_admission_windows(conn) -> tuple:
 
 def _load_admission_clinical_info(conn) -> dict:
     """
-    {admission_id: {dept_name, gender, age, status, admission_type}} — used to
+    {admission_id: {dept_name, gender, age, status, admission_type, age_at_admission}} — used to
     sample department-appropriate, gender/age-valid ICD-10 codes, age-banded
     vitals, and to decide which admissions get clinical records at all.
     """
     result = conn.execute(text("""
         SELECT a.admission_id, dpt.dep_name, p.gender, p.age,
-               a.admission_status, a.admission_type
+               a.admission_status, a.admission_type,
+               TIMESTAMPDIFF(YEAR, p.birth_date, DATE(a.admission_date))
         FROM admissions a
         JOIN departments dpt ON a.department_id = dpt.department_id
         JOIN patients p      ON a.patient_id    = p.patient_id
@@ -1018,7 +1020,8 @@ def _load_admission_clinical_info(conn) -> dict:
     info_map = {}
     for row in result:
         info_map[row[0]] = {"dept_name": row[1], "gender": row[2], "age": row[3],
-                            "status": row[4], "admission_type": row[5]}
+                            "status": row[4], "admission_type": row[5],
+                            "age_at_admission": row[6]}
     return info_map
 
 
@@ -1082,6 +1085,7 @@ def gen_diagnoses(conn, cfg: dict, admission_ids: list, doctor_pool: StaffPool,
                      :diagnosis_date, :diagnosis_type)"""
 
     rows = []
+    dx_map = {}                                  # admission_id -> its ICD-10 codes
     for adm_id in admission_ids:
         adm_dt = adm_dt_map.get(adm_id, AS_OF)
         dis_dt = dis_dt_map.get(adm_id)
@@ -1107,14 +1111,16 @@ def gen_diagnoses(conn, cfg: dict, admission_ids: list, doctor_pool: StaffPool,
                 "diagnosis_date": dx_date,
                 "diagnosis_type": dx_type,
             })
+            dx_map.setdefault(adm_id, []).append(dx['icd10_code'])
 
     execute_batch(conn, sql, rows)
     print(f"    {len(rows)} diagnoses inserted")
+    return dx_map
 
 
 def gen_patient_procedures(conn, cfg: dict, admission_ids: list,
                            doctor_pool: StaffPool, adm_dt_map: dict,
-                           dis_dt_map: dict) -> list:
+                           dis_dt_map: dict, dx_map: dict, adm_info_map: dict) -> list:
     print(f"  Generating patient procedures...")
     sql = """INSERT INTO patient_procedures
              (patient_procedure_id, admission_id, procedure_id, doctor_id,
@@ -1132,6 +1138,7 @@ def gen_patient_procedures(conn, cfg: dict, admission_ids: list,
         adm_dt = adm_dt_map.get(adm_id, AS_OF)
         dis_dt = dis_dt_map.get(adm_id)
         count  = poisson_count(cfg['avg_procedures'])
+        info   = adm_info_map[adm_id]
 
         for _ in range(count):
             ppid    = gen_id("PRP")
@@ -1139,7 +1146,9 @@ def gen_patient_procedures(conn, cfg: dict, admission_ids: list,
             rows.append({
                 "patient_procedure_id": ppid,
                 "admission_id":         adm_id,
-                "procedure_id":         random.choice(proc_ids),
+                "procedure_id":         pick_procedure(dx_map.get(adm_id, []), info['gender'],
+                                                       info['age_at_admission'], proc_ids,
+                                                       emergency=info['admission_type'] == 'Emergency'),
                 "doctor_id":            doctor_pool.pick(pp_date),
                 "procedure_date":       pp_date,
                 "procedure_status":     np.random.choice(pp_statuses, p=pp_status_p),
@@ -1153,7 +1162,7 @@ def gen_patient_procedures(conn, cfg: dict, admission_ids: list,
 
 
 def gen_medications(conn, cfg: dict, admission_ids: list, doctor_pool: StaffPool,
-                    adm_dt_map: dict, dis_dt_map: dict):
+                    adm_dt_map: dict, dis_dt_map: dict, dx_map: dict, adm_info_map: dict):
     print(f"  Generating medications...")
     sql = """INSERT INTO medications
              (medication_id, admission_id, doctor_id, drug_name, dosage,
@@ -1163,15 +1172,18 @@ def gen_medications(conn, cfg: dict, admission_ids: list, doctor_pool: StaffPool
 
     med_statuses = ['Active', 'Discontinued', 'Completed']
     med_status_p = [0.30, 0.20, 0.50]
+    med_by_name  = {m["drug_name"]: m for m in MEDICATIONS_LIST}
     rows         = []
 
     for adm_id in admission_ids:
         adm_dt = adm_dt_map.get(adm_id, AS_OF)
         dis_dt = dis_dt_map.get(adm_id)
         count  = poisson_count(cfg['avg_medications'])
+        info   = adm_info_map[adm_id]
 
         for _ in range(count):
-            med        = random.choice(MEDICATIONS_LIST)
+            med        = med_by_name[pick_medication(dx_map.get(adm_id, []), info['gender'],
+                                                     info['age_at_admission'], list(med_by_name))]
             start      = date_within_admission(adm_dt, dis_dt)
             med_status = np.random.choice(med_statuses, p=med_status_p)
             end_dt     = None
@@ -1197,7 +1209,8 @@ def gen_medications(conn, cfg: dict, admission_ids: list, doctor_pool: StaffPool
 
 def gen_medical_tests(conn, cfg: dict, admission_ids: list,
                       doctor_pool: StaffPool, nurse_pool: StaffPool,
-                      adm_dt_map: dict, dis_dt_map: dict) -> list:
+                      adm_dt_map: dict, dis_dt_map: dict,
+                      dx_map: dict, adm_info_map: dict) -> list:
     print(f"  Generating medical tests...")
     sql = """INSERT INTO medical_tests
              (test_id, admission_id, doctor_id, nurse_id, test_name,
@@ -1218,7 +1231,7 @@ def gen_medical_tests(conn, cfg: dict, admission_ids: list,
         'Neurology':    [('EEG', 900), ('Nerve Conduction Study', 650), ('Lumbar Puncture', 1100)],
     }
 
-    categories  = list(test_catalog.keys())
+    test_lookup = {name: (cat, cost) for cat, tests in test_catalog.items() for name, cost in tests}
     result_opts = ['Normal', 'Abnormal - Mild', 'Abnormal - Moderate',
                    'Abnormal - Severe', 'Inconclusive', 'Pending']
     result_p    = [0.45, 0.25, 0.15, 0.05, 0.05, 0.05]
@@ -1229,11 +1242,13 @@ def gen_medical_tests(conn, cfg: dict, admission_ids: list,
         adm_dt = adm_dt_map.get(adm_id, AS_OF)
         dis_dt = dis_dt_map.get(adm_id)
         count  = poisson_count(cfg['avg_tests'])
+        info   = adm_info_map[adm_id]
 
         for _ in range(count):
             tid           = gen_id("TST")
-            category      = random.choice(categories)
-            test_nm, cost = random.choice(test_catalog[category])
+            test_nm       = pick_test(dx_map.get(adm_id, []), info['gender'],
+                                      info['age_at_admission'], list(test_lookup))
+            category, cost = test_lookup[test_nm]
             test_dt       = datetime_within_admission(adm_dt, dis_dt)
             result        = np.random.choice(result_opts, p=result_p)
 
@@ -1495,15 +1510,18 @@ def main(size: str = "medium"):
                         if adm_info_map[a]['status'] in ('Admitted', 'Discharged')]
 
         gen_triage(conn, clinical_ids, nurse_pool, adm_info_map, adm_dt_map, dis_dt_map)
-        gen_diagnoses(
+        dx_map = gen_diagnoses(
             conn, cfg, clinical_ids, doctor_pool, adm_dt_map, dis_dt_map, adm_info_map
         )
+        # Treatments follow the diagnoses (data/clinical_rules.py)
         gen_patient_procedures(
-            conn, cfg, clinical_ids, doctor_pool, adm_dt_map, dis_dt_map
+            conn, cfg, clinical_ids, doctor_pool, adm_dt_map, dis_dt_map, dx_map, adm_info_map
         )
-        gen_medications(conn, cfg, clinical_ids, doctor_pool, adm_dt_map, dis_dt_map)
+        gen_medications(conn, cfg, clinical_ids, doctor_pool, adm_dt_map, dis_dt_map,
+                        dx_map, adm_info_map)
         gen_medical_tests(
-            conn, cfg, clinical_ids, doctor_pool, nurse_pool, adm_dt_map, dis_dt_map
+            conn, cfg, clinical_ids, doctor_pool, nurse_pool, adm_dt_map, dis_dt_map,
+            dx_map, adm_info_map
         )
         gen_staff_shifts(conn, cfg, dept_ids)
         conn.commit()
