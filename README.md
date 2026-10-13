@@ -111,6 +111,7 @@ Design notes (all in `app/utils.py`):
 - **Colors are assigned by category identity** (not chart-local rank or hue-cycling), with true evaluative "status" colors (e.g. payment status, discharge disposition) kept separate from plain categorical identity and from ordinal severity scales.
 - **13px minimum font** across the whole dashboard (chart axes, legends, captions, widget labels); long chart labels are wrapped onto at most two lines rather than shrunk.
 - **Every zoomable chart carries a "drag to zoom · double-click to reset" hint** (`plot()` in `app/utils.py`).
+- **Every chart has a collapsed "View as table" twin** with the numbers behind it, read from the figure itself so the two can't disagree (histograms show summary statistics). Several palette colours (aqua, yellow, magenta) are under 3:1 contrast against the chart background, which the palette validator flags as needing labels or a table view; this is the table view.
 
 ## Project Structure
 

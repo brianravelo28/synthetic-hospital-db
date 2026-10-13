@@ -82,3 +82,62 @@ def test_every_categorical_color_map_value_is_a_hex_color(app_utils):
         if name.endswith("_COLORS") and isinstance(getattr(app_utils, name), dict):
             for color in getattr(app_utils, name).values():
                 assert re.fullmatch(r"#[0-9a-fA-F]{6}", color), (name, color)
+
+
+# ── chart table views: the table is read from the figure itself ──────────
+
+def test_chart_table_single_series_bar(app_utils):
+    import plotly.express as px
+    fig = px.bar(x=["A", "B", "C"], y=[3, 1, 2], labels={"x": "Dept", "y": "Admissions"})
+    t = app_utils.chart_table(fig)
+    assert list(t.columns) == ["Dept", "Admissions"]
+    assert t.values.tolist() == [["A", 3], ["B", 1], ["C", 2]]
+
+
+def test_chart_table_horizontal_bar_reads_categories_from_y(app_utils):
+    import plotly.express as px
+    fig = px.bar(x=[5, 9], y=["Flu", "Fracture"], orientation="h", labels={"x": "Count", "y": "Diagnosis"})
+    t = app_utils.chart_table(fig)
+    assert list(t.columns) == ["Diagnosis", "Count"]
+    assert t["Diagnosis"].tolist() == ["Flu", "Fracture"]
+
+
+def test_chart_table_multi_series_pivots_and_keeps_chart_order(app_utils):
+    import pandas as pd
+    import plotly.express as px
+    df = pd.DataFrame({"m": ["Z", "Z", "A", "A"], "s": ["Paid", "Denied", "Paid", "Denied"], "n": [1, 2, 3, 4]})
+    t = app_utils.chart_table(px.bar(df, x="m", y="n", color="s"))
+    assert t["m"].tolist() == ["Z", "A"]                  # not alphabetical
+    assert set(t.columns) == {"m", "Paid", "Denied"}
+    assert t.loc[t["m"] == "A", "Denied"].item() == 4
+
+
+def test_chart_table_pie_and_histogram(app_utils):
+    import plotly.express as px
+    pie = app_utils.chart_table(px.pie(names=["x", "y"], values=[1, 3]))
+    assert pie.values.tolist() == [["x", 1], ["y", 3]]
+    hist = app_utils.chart_table(px.histogram(x=[1, 2, 3, 4, 5], labels={"x": "Days"}))
+    assert hist.set_index("Statistic")["Days"]["Count"] == "5"
+    assert hist.set_index("Statistic")["Days"]["Median"] == "3.0"
+
+
+def test_every_plot_call_gets_a_table_view():
+    """plot() is the single place charts are rendered, and it adds the twin."""
+    src = (Path(__file__).resolve().parent.parent / "app" / "utils.py").read_text(encoding="utf-8")
+    assert "View as table" in src
+    for view in (Path(__file__).resolve().parent.parent / "app" / "views").glob("*.py"):
+        assert "st.plotly_chart" not in view.read_text(encoding="utf-8"), view.name
+
+
+def test_shift_colors_are_not_the_orange_red_pair(app_utils):
+    """The palette validator failed orange (slot 2) + red (slot 8) for Afternoon/Night."""
+    used = set(app_utils.SHIFT_TYPE_COLORS.values())
+    assert not {app_utils.CATEGORICAL[1], app_utils.CATEGORICAL[7]} <= used
+
+
+def test_chart_table_colour_that_repeats_the_category_does_not_pivot(app_utils):
+    import pandas as pd
+    import plotly.express as px
+    df = pd.DataFrame({"type": ["Doctor", "Nurse"], "hours": [10, 20]})
+    t = app_utils.chart_table(px.bar(df, x="type", y="hours", color="type"))
+    assert t.values.tolist() == [["Doctor", 10], ["Nurse", 20]]       # no None-filled diagonal

@@ -98,10 +98,11 @@ STAFF_TYPE_COLORS = {
     "Employee": CATEGORICAL[6],
 }
 
+# slots 4/1/7, not 4/2/8: orange and red were only dE 7 apart (palette validator)
 SHIFT_TYPE_COLORS = {
     "Morning": CATEGORICAL[3],
-    "Afternoon": CATEGORICAL[1],
-    "Night": CATEGORICAL[7],
+    "Afternoon": CATEGORICAL[0],
+    "Night": CATEGORICAL[6],
 }
 
 # patient_condition is an ORDERED severity scale -> ordinal ramp, not identity
@@ -281,12 +282,64 @@ def wrap_label(text: str, width: int = 25, max_lines: int = 2) -> str:
 CHART_HINT = "Drag to zoom · double-click to reset"
 
 
+def chart_table(fig) -> pd.DataFrame | None:
+    """The numbers behind a Plotly figure as a table, read from the figure itself
+    so the chart and its table view cannot disagree. Returns None if the figure
+    has nothing tabulable. Histograms (raw values, binned by the browser) get
+    summary statistics instead of bins we would have to guess."""
+    traces = [t for t in fig.data if t.type in ("bar", "scatter", "pie", "histogram")]
+    if not traces:
+        return None
+    layout = fig.layout
+
+    def axis_title(axis, default):
+        text = axis.title.text if axis is not None and axis.title is not None else None
+        return text or default
+
+    if traces[0].type == "histogram":
+        x = pd.Series(list(traces[0].x), dtype="float64")
+        label = axis_title(layout.xaxis, "Value")
+        return pd.DataFrame({label: {
+            "Count": f"{len(x):,}", "Min": f"{x.min():,.1f}", "Median": f"{x.median():,.1f}",
+            "Mean": f"{x.mean():,.1f}", "90th percentile": f"{x.quantile(0.9):,.1f}", "Max": f"{x.max():,.1f}",
+        }}).rename_axis("Statistic").reset_index()
+
+    if traces[0].type == "pie":
+        t = traces[0]
+        return pd.DataFrame({"Category": list(t.labels), "Value": list(t.values)})
+
+    horizontal = traces[0].orientation == "h"
+    cat_title = axis_title(layout.yaxis if horizontal else layout.xaxis, "Category")
+    val_title = axis_title(layout.xaxis if horizontal else layout.yaxis, "Value")
+    frames = []
+    for t in traces:
+        cats, vals = (t.y, t.x) if horizontal else (t.x, t.y)
+        if cats is None or vals is None:
+            continue
+        frames.append(pd.DataFrame({cat_title: list(cats), "series": t.name or val_title, val_title: list(vals)}))
+    if not frames:
+        return None
+    long = pd.concat(frames, ignore_index=True)
+    if long.groupby(cat_title)["series"].nunique().max() == 1:
+        # one series, or colour just repeats the category (one bar per trace): no pivot needed
+        return long.drop(columns="series")
+    order = list(dict.fromkeys(long[cat_title]))                  # keep the chart's own order
+    wide = long.pivot_table(index=cat_title, columns="series", values=val_title, aggfunc="sum")
+    series_order = list(dict.fromkeys(long["series"]))
+    return wide.reindex(order)[series_order].reset_index()
+
+
 def plot(fig, hint: bool = True) -> None:
     """Render a Plotly figure with the standing drag-to-zoom / double-click-to-reset
-    hint underneath (pass hint=False for charts that can't zoom, e.g. donuts)."""
+    hint underneath (pass hint=False for charts that can't zoom, e.g. donuts),
+    plus a collapsed "View as table" twin so no value depends on colour or hover."""
     st.plotly_chart(fig, width="stretch")
     if hint:
         st.caption(CHART_HINT)
+    table = chart_table(fig)
+    if table is not None:
+        with st.expander("View as table"):
+            st.dataframe(table, hide_index=True, width="stretch")
 
 
 def render_kpi_row(items: list) -> None:
