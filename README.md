@@ -10,6 +10,8 @@
 
 **[Live Demo →](https://synthetic-hospital-db.streamlit.app/)**
 
+*The app runs on Streamlit's free tier and sleeps when idle — if you see a "This app has gone to sleep" screen, click **Yes, get this app back up!** and give it a few seconds.*
+
 **100% synthetic — no real patient data.** A constraint-aware generator for a fully-relational 17-table hospital database (MySQL/MariaDB), a 51-check validation suite with an automatic repair step, and a 6-page dashboard built on top of it — including a Data Quality page that shows the validation results. Built to demonstrate data-engineering and data-quality thinking, not to model any real institution — see [Data Sources & References](docs/CITATIONS.md#synthetic-data-disclosure) for the full disclosure.
 
 ## Overview
