@@ -1,0 +1,7 @@
+{
+  "size": "medium",
+  "generator": "archived pre-patch generator",
+  "validator": "current 51 checks",
+  "violations_before_repair": 25681,
+  "repair_error": "(pymysql.err.OperationalError) (4025, 'CONSTRAINT `chk_payment_date` failed for `hospital_test`.`billing`')"
+}

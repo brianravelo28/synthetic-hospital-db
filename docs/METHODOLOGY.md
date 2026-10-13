@@ -23,7 +23,22 @@ Patching things that weren't broken would have wasted the "preventive over react
 
 **4. `gen_billing()`'s `bill_date` ignored `discharge_date`.** *Fix:* anchored to `discharge_date` (+0–90 days).
 
-Items 1–4 were found by reading code and reasoning about what the validator would catch. **They were never measured against a baseline run of the old generator**, so this document makes no claim about how much each one helped.
+Items 1–4 were found by reading code and reasoning about what the validator would catch. They were not measured at the time; that has since been done by running the **archived pre-patch generator** (`hospital_generator_legacy.py`, kept outside this repo) through today's 51 checks at all three scales, each in its own process with the same seed. Results are in `docs/validation_runs/legacy_generator_*.csv`. At large scale, before any repair:
+
+| Group | Pre-patch generator | Current generator |
+|---|---|---|
+| 1 · Temporal | 1,548 | 0 |
+| 2 · Age-based | 4,250 | 58 |
+| 3 · Admission type | 14,645 | 0 |
+| 4 · Department | 5,119 | 0 |
+| 5 · Diagnoses | 1,803 | 0 |
+| 6 · Financial | 10,936 | 0 |
+| 7 · Realism (detect-only) | 61,231 | 0 |
+| **Total** | **99,532** | **58** |
+
+(Small: 6,177 → 183. Medium: 25,681 → 79.) This confirms the reasoning above: the round-one patches targeted groups 1, 2, 4 and 5, which together fell from 12,720 violations (1,548 + 4,250 + 5,119 + 1,803) to 58 — while groups 3 and 6 were untouched until round two. It does *not* attribute the improvement to individual patches; only the doctor fix has its own before/after.
+
+**The old generator's output could not be repaired.** Run through today's `repair_all()`, the pre-patch data makes the repair step crash at every scale: moving a bill's date forward to its discharge date violates the table's own `CHECK (payment_date >= bill_date)` constraint (MariaDB error 4025 on `chk_payment_date`), because those bills had been given payment dates before the discharge they were being moved to. So "after repair" numbers don't exist for it. (The repair code was unchanged in that statement; the current generator never produces the conflicting dates.) This is a measured fact about this repair code on this data, not a claim about what the original author's loop did on their machine.
 
 ### A fifth bug, found by testing at small scale
 

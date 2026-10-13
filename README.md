@@ -2,6 +2,8 @@
 
 ![Hospital Operations dashboard](docs/screenshot.png)
 
+![Data Quality page — the 51 checks, before vs after repair](docs/screenshot_data_quality.png)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Live Demo](https://img.shields.io/badge/dashboard-Live%20Demo-FF4B4B.svg?logo=streamlit&logoColor=white)](https://synthetic-hospital-db.streamlit.app/)
@@ -18,6 +20,7 @@ Most synthetic-data generators produce rows that are individually plausible but 
 - 🏥 **17-table relational schema**: departments, staff, patients, admissions, clinical records, and billing — full FK graph, `CHECK` constraints, one polymorphic reference pattern (`staff_shifts.staff_id`)
 - 🐛 **A real bug found and fixed**: at small scale, 10 of 20 departments ended up with zero doctors — making a whole violation category *permanently unrepairable*. See [docs/METHODOLOGY.md](docs/METHODOLOGY.md#a-fifth-bug-found-by-testing-at-small-scale).
 - 🔍 **The validator was not independent, so I added checks that were**: the original six check groups were written alongside the generator, which was then built to satisfy them — on the generator's earlier output they reported **19** violations. Sixteen realism checks added afterwards (Group 7) found **59,105** in that same dataset: 2,409 patients "currently admitted" (one since 2020), bill lines pointing at other patients' procedures, doctors treating before they were hired. Every one was then fixed in the generator, and the checks now pass on fresh data. See [docs/METHODOLOGY.md](docs/METHODOLOGY.md#second-round-independent-checks).
+- 🕰️ **Measured against the old generator**: the archived pre-patch generator produced **99,532** violations at large scale (against today's 51 checks), and its output couldn't even be repaired — the repair step crashes on a `CHECK` constraint. The current generator produces 58. See [docs/METHODOLOGY.md](docs/METHODOLOGY.md#round-one-what-was-actually-broken).
 - 📉 **What each stage leaves behind**, latest recorded run at each scale — "before repair" is what the generator produced by itself:
 
   | Scale | Admissions | Violations before repair | After repair |
