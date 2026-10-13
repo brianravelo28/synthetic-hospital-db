@@ -29,9 +29,10 @@ TABLES = [
 ]
 
 
-def export(out_dir: Path, host: str, user: str, password: str, port: int, db: str):
+def export(out_dir: Path, host: str = "localhost", user: str = "root", password: str = "",
+           port: int = 3306, db: str = "hospital_db", url: str = None):
     out_dir.mkdir(parents=True, exist_ok=True)
-    engine = create_engine(f"mysql+pymysql://{user}:{password}@{host}:{port}/{db}")
+    engine = create_engine(url or f"mysql+pymysql://{user}:{password}@{host}:{port}/{db}")
 
     total_rows = 0
     with engine.connect() as conn:

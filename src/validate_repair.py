@@ -31,6 +31,7 @@ Usage (Jupyter):
     print_report(report)
 """
 
+import os
 import random
 import numpy as np
 from datetime import date, datetime, timedelta
@@ -39,7 +40,7 @@ from collections import defaultdict
 
 from icd10_diagnoses import sample_diagnosis, get_diagnoses_for_department
 
-DB_URL = "mysql+pymysql://root:@localhost/hospital_db"
+DB_URL = os.environ.get("HOSPITAL_DB_URL", "mysql+pymysql://root:@localhost/hospital_db")
 
 
 # =============================================================================
@@ -342,15 +343,16 @@ def repair_temporal(conn):
     # ── Registered date: probabilistic by age (Python loop) ───────────────
     result = conn.execute(text("""
         SELECT p.patient_id, p.age,
-               COALESCE(MIN(DATE(a.admission_date)), CURDATE()) AS first_adm
+               COALESCE(MIN(DATE(a.admission_date)), CURDATE()) AS first_adm,
+               p.birth_date
         FROM patients p
         LEFT JOIN admissions a ON p.patient_id = a.patient_id
-        GROUP BY p.patient_id, p.age
+        GROUP BY p.patient_id, p.age, p.birth_date
     """))
     rows = result.fetchall()
     updates = []
     for row in rows:
-        patient_id, age, first_adm = row
+        patient_id, age, first_adm, birth_date = row
         if isinstance(first_adm, str):
             first_adm = date.fromisoformat(first_adm)
 
@@ -367,6 +369,11 @@ def repair_temporal(conn):
                 delta    = random.randint(0, 730)
                 reg_date = first_adm - timedelta(days=delta)
 
+        if isinstance(birth_date, str):
+            birth_date = date.fromisoformat(birth_date)
+        # registration can't precede birth, and can't be in the future
+        # (the first admission may be a scheduled one that hasn't happened yet)
+        reg_date = min(max(reg_date, birth_date), date.today())
         updates.append({"patient_id": patient_id, "registered_date": reg_date})
 
     batch_update(conn,
@@ -937,6 +944,114 @@ def repair_financial(conn):
 
 
 # =============================================================================
+# GROUP 7 — OPERATIONAL REALISM (detect-only)
+# =============================================================================
+# Groups 1-6 were written alongside the generator, so the generator was built
+# to satisfy them. These checks were added afterwards, deliberately NOT
+# designed around: each one catches something that looks wrong on the
+# dashboard or in a join. There is no repair for this group — repairing e.g. a
+# line item that points at another patient's procedure would mean fabricating
+# data; the generator has to produce it correctly instead.
+
+def validate_realism(conn) -> dict:
+    return {
+        'census_exceeds_bed_capacity': _count(conn, """
+            SELECT COUNT(*) FROM (
+                SELECT department_id, COUNT(*) AS n FROM admissions
+                WHERE admission_status = 'Admitted' GROUP BY department_id
+            ) x JOIN departments d ON d.department_id = x.department_id
+            WHERE x.n > d.bed_capacity
+        """),
+        'stale_admitted_over_60d': _count(conn, """
+            SELECT COUNT(*) FROM admissions
+            WHERE admission_status = 'Admitted'
+              AND admission_date < DATE_SUB(NOW(), INTERVAL 60 DAY)
+        """),
+        'scheduled_in_past': _count(conn, """
+            SELECT COUNT(*) FROM admissions
+            WHERE admission_status = 'Scheduled' AND admission_date < NOW()
+        """),
+        'admission_before_birth': _count(conn, """
+            SELECT COUNT(*) FROM admissions a
+            JOIN patients p ON p.patient_id = a.patient_id
+            WHERE DATE(a.admission_date) < p.birth_date
+        """),
+        'registered_before_birth': _count(conn, """
+            SELECT COUNT(*) FROM patients WHERE registered_date < birth_date
+        """),
+        'registered_in_future': _count(conn, """
+            SELECT COUNT(*) FROM patients WHERE registered_date > CURDATE()
+        """),
+        'bill_before_admission': _count(conn, """
+            SELECT COUNT(*) FROM billing b
+            JOIN admissions a ON a.admission_id = b.admission_id
+            WHERE b.bill_date < DATE(a.admission_date)
+        """),
+        'bill_on_undischarged_admission': _count(conn, """
+            SELECT COUNT(*) FROM billing b
+            JOIN admissions a ON a.admission_id = b.admission_id
+            WHERE a.admission_status <> 'Discharged'
+        """),
+        'procedure_item_wrong_admission': _count(conn, """
+            SELECT COUNT(*) FROM billing_line_items li
+            JOIN billing b ON b.bill_id = li.bill_id
+            JOIN patient_procedures pp ON pp.patient_procedure_id = li.patient_procedure_id
+            WHERE pp.admission_id <> b.admission_id
+        """),
+        'lab_item_wrong_admission': _count(conn, """
+            SELECT COUNT(*) FROM billing_line_items li
+            JOIN billing b ON b.bill_id = li.bill_id
+            JOIN medical_tests mt ON mt.test_id = li.test_id
+            WHERE mt.admission_id <> b.admission_id
+        """),
+        'procedure_or_lab_item_missing_link': _count(conn, """
+            SELECT COUNT(*) FROM billing_line_items
+            WHERE (item_type = 'Procedure' AND patient_procedure_id IS NULL)
+               OR (item_type = 'Lab' AND test_id IS NULL)
+        """),
+        'cancelled_has_clinical_records': _count(conn, """
+            SELECT
+              (SELECT COUNT(*) FROM triage t JOIN admissions a ON a.admission_id = t.admission_id WHERE a.admission_status = 'Cancelled')
+            + (SELECT COUNT(*) FROM diagnoses t JOIN admissions a ON a.admission_id = t.admission_id WHERE a.admission_status = 'Cancelled')
+            + (SELECT COUNT(*) FROM patient_procedures t JOIN admissions a ON a.admission_id = t.admission_id WHERE a.admission_status = 'Cancelled')
+            + (SELECT COUNT(*) FROM medications t JOIN admissions a ON a.admission_id = t.admission_id WHERE a.admission_status = 'Cancelled')
+            + (SELECT COUNT(*) FROM medical_tests t JOIN admissions a ON a.admission_id = t.admission_id WHERE a.admission_status = 'Cancelled')
+        """),
+        'pediatric_vitals_implausible': _count(conn, """
+            SELECT COUNT(*) FROM triage t
+            JOIN admissions a ON a.admission_id = t.admission_id
+            JOIN patients p ON p.patient_id = a.patient_id
+            WHERE (p.age <= 1  AND (t.height_cm > 100 OR t.weight_kg > 20))
+               OR (p.age BETWEEN 2 AND 12 AND (t.height_cm > 170 OR t.weight_kg > 80))
+        """),
+        'staff_hired_before_age_21': _count(conn, """
+            SELECT (SELECT COUNT(*) FROM doctors WHERE TIMESTAMPDIFF(YEAR, birth_date, hire_date) < 21)
+                 + (SELECT COUNT(*) FROM nurses  WHERE TIMESTAMPDIFF(YEAR, birth_date, hire_date) < 21)
+        """),
+        'staff_event_before_hire': _count(conn, """
+            SELECT
+              (SELECT COUNT(*) FROM admissions x JOIN doctors s ON s.doctor_id = x.admitting_doctor_id WHERE DATE(x.admission_date) < s.hire_date)
+            + (SELECT COUNT(*) FROM diagnoses x JOIN doctors s ON s.doctor_id = x.doctor_id WHERE x.diagnosis_date < s.hire_date)
+            + (SELECT COUNT(*) FROM patient_procedures x JOIN doctors s ON s.doctor_id = x.doctor_id WHERE DATE(x.procedure_date) < s.hire_date)
+            + (SELECT COUNT(*) FROM medications x JOIN doctors s ON s.doctor_id = x.doctor_id WHERE x.start_date < s.hire_date)
+            + (SELECT COUNT(*) FROM medical_tests x JOIN doctors s ON s.doctor_id = x.doctor_id WHERE DATE(x.test_date) < s.hire_date)
+            + (SELECT COUNT(*) FROM medical_tests x JOIN nurses s ON s.nurse_id = x.nurse_id WHERE DATE(x.test_date) < s.hire_date)
+            + (SELECT COUNT(*) FROM triage x JOIN nurses s ON s.nurse_id = x.nurse_id WHERE DATE(x.triage_datetime) < s.hire_date)
+        """),
+        'shift_before_hire_or_wrong_dept': _count(conn, """
+            SELECT
+              (SELECT COUNT(*) FROM staff_shifts x JOIN doctors s ON s.doctor_id = x.staff_id
+                 WHERE x.staff_type = 'Doctor' AND (x.shift_date < s.hire_date OR x.department_id <> s.department_id))
+            + (SELECT COUNT(*) FROM staff_shifts x JOIN nurses s ON s.nurse_id = x.staff_id
+                 WHERE x.staff_type = 'Nurse' AND (x.shift_date < s.hire_date OR x.department_id <> s.department_id))
+            + (SELECT COUNT(*) FROM staff_shifts x JOIN employees s ON s.employee_id = x.staff_id
+                 WHERE x.staff_type = 'Employee'
+                   AND (x.shift_date < s.hire_date OR (s.department_id IS NOT NULL AND x.department_id <> s.department_id)))
+        """),
+    }
+
+
+# =============================================================================
 # MAIN VALIDATE / REPAIR FUNCTIONS
 # =============================================================================
 
@@ -952,19 +1067,32 @@ def validate_all(conn) -> dict:
         'group4_department':      validate_department(conn),
         'group5_diagnoses':       validate_diagnoses(conn),
         'group6_financial':       validate_financial(conn),
+        'group7_realism':         validate_realism(conn),
     }
+
+
+GROUP_LABELS = {
+    'group1_temporal':       'Group 1 — Temporal',
+    'group2_age':            'Group 2 — Age-based',
+    'group3_admission_type': 'Group 3 — Admission Type',
+    'group4_department':     'Group 4 — Department Consistency',
+    'group5_diagnoses':      'Group 5 — Diagnosis Alignment',
+    'group6_financial':      'Group 6 — Financial',
+    'group7_realism':        'Group 7 — Operational Realism (detect-only)',
+}
+
+
+def report_to_rows(report: dict) -> list:
+    """Flatten a validate_all() report into [{group, group_label, rule, count}]."""
+    return [
+        {'group': g, 'group_label': GROUP_LABELS.get(g, g), 'rule': rule, 'count': int(count)}
+        for g, checks in report.items() for rule, count in checks.items()
+    ]
 
 
 def print_report(report: dict):
     """Print a human-readable validation report."""
-    group_labels = {
-        'group1_temporal':       'Group 1 — Temporal',
-        'group2_age':            'Group 2 — Age-based',
-        'group3_admission_type': 'Group 3 — Admission Type',
-        'group4_department':     'Group 4 — Department Consistency',
-        'group5_diagnoses':      'Group 5 — Diagnosis Alignment',
-        'group6_financial':      'Group 6 — Financial',
-    }
+    group_labels = GROUP_LABELS
 
     total_violations = 0
     print(f"\n{'='*60}")

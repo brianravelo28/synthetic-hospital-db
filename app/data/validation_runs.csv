@@ -1,0 +1,4 @@
+size,admissions,checks,violations_before_repair,violations_after_repair,generated_at_utc
+small,800,51,183,61,2026-10-13 12:38
+medium,3200,51,79,37,2026-10-13 12:40
+large,12000,51,58,0,2026-10-13 12:42

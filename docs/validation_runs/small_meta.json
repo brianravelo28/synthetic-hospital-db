@@ -1,0 +1,8 @@
+{
+  "size": "small",
+  "generated_at_utc": "2026-10-13 12:38",
+  "checks": 51,
+  "violations_before_repair": 183,
+  "violations_after_repair": 61,
+  "admissions": 800
+}

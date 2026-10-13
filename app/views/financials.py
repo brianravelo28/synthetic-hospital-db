@@ -18,6 +18,7 @@ from utils import (
     fmt_currency,
     fmt_pct,
     load_data,
+    plot,
     render_kpi_row,
 )
 
@@ -55,7 +56,7 @@ with col1:
     fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, xaxis_title="Total billed ($)", yaxis_title="")
     fig.update_xaxes(**AXIS_STYLE)
     fig.update_yaxes(**AXIS_STYLE)
-    st.plotly_chart(fig, use_container_width=True)
+    plot(fig)
 
 with col2:
     st.subheader("Payment status mix")
@@ -69,7 +70,7 @@ with col2:
     )
     fig.update_traces(textinfo="label+percent")
     fig.update_layout(**PLOTLY_LAYOUT, showlegend=False)
-    st.plotly_chart(fig, use_container_width=True)
+    plot(fig, hint=False)
 
 col3, col4 = st.columns(2)
 
@@ -83,7 +84,7 @@ with col3:
     fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, xaxis_title="Total cost ($)", yaxis_title="")
     fig.update_xaxes(**AXIS_STYLE)
     fig.update_yaxes(**AXIS_STYLE)
-    st.plotly_chart(fig, use_container_width=True)
+    plot(fig)
 
 with col4:
     st.subheader("Avg. bill amount by admission type")
@@ -96,7 +97,7 @@ with col4:
     fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, xaxis_title="Avg. total billed ($)", yaxis_title="")
     fig.update_xaxes(**AXIS_STYLE)
     fig.update_yaxes(**AXIS_STYLE)
-    st.plotly_chart(fig, use_container_width=True)
+    plot(fig)
 
 st.subheader("Billed revenue over time")
 monthly_rev = (
@@ -107,4 +108,4 @@ fig.update_traces(line=dict(color=CATEGORICAL[0], width=2))
 fig.update_layout(**PLOTLY_LAYOUT, xaxis_title="", yaxis_title="Billed revenue ($) / month")
 fig.update_xaxes(**AXIS_STYLE)
 fig.update_yaxes(**AXIS_STYLE)
-st.plotly_chart(fig, use_container_width=True)
+plot(fig)

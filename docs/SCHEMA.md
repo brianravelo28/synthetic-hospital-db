@@ -26,7 +26,7 @@ Full DDL with constraints, indexes, and inline column comments: [`data/hospital_
 
 | Table | Key columns | Notes |
 |---|---|---|
-| `admissions` | `admission_id` (PK), `patient_id`/`admitting_doctor_id`/`department_id`/`room_id` (FKs), `admission_date`, `discharge_date`, `admission_type` (ENUM), `admission_status` (ENUM), `discharge_disposition` (ENUM), `patient_condition` (ENUM, ordered severity), `length_of_stay` | The central table — almost everything else hangs off `admission_id`. `admission_status = Scheduled` means no room yet; `Cancelled`/`Scheduled` admissions carry no downstream clinical or billing records (enforced by the repair pipeline). |
+| `admissions` | `admission_id` (PK), `patient_id`/`admitting_doctor_id`/`department_id`/`room_id` (FKs), `admission_date`, `discharge_date`, `admission_type` (ENUM), `admission_status` (ENUM), `discharge_disposition` (ENUM), `patient_condition` (ENUM, ordered severity), `length_of_stay` | The central table — almost everything else hangs off `admission_id`. `admission_status = Scheduled` means no room yet; `Scheduled` admissions are future-dated; `Admitted` means the stay hasn't ended yet (decided by dates); `Cancelled`/`Scheduled` admissions carry no downstream clinical or billing records (prevented at generation, and still enforced by repair). |
 | `triage` | `triage_id` (PK), `admission_id` (FK), `nurse_id` (FK), vitals, `acuity_level` | One record per admission (≈80% of admissions get one). `acuity_level` is the Emergency Severity Index (ESI), 1 = most critical, 5 = least urgent. |
 | `diagnoses` | `diagnosis_id` (PK), `admission_id`/`doctor_id` (FKs), `icd10_code`, `diagnosis_type` (Primary/Secondary/Tertiary/Complication) | ICD-10-CM codes from `icd10_diagnoses.py` (66 curated codes across 13 clinical categories, weighted by approximate real-world prevalence). |
 | `patient_procedures` | `patient_procedure_id` (PK), `admission_id`/`procedure_id`/`doctor_id` (FKs), `procedure_status` | Junction table, admissions × procedure catalog. |
@@ -38,9 +38,18 @@ Full DDL with constraints, indexes, and inline column comments: [`data/hospital_
 
 | Table | Key columns | Notes |
 |---|---|---|
-| `billing` | `bill_id` (PK), `admission_id` (FK, UNIQUE — one bill per admission), `patient_id`/`payer_id` (FKs), `bill_date`, `total_amount`, `insurance_covered`, `patient_responsibility`, `payment_status` (ENUM) | `bill_date` is anchored to the admission's `discharge_date` when one exists (see METHODOLOGY.md). |
-| `billing_line_items` | `line_item_id` (PK), `bill_id` (FK), `item_type` (ENUM: Procedure/Medication/Room/Lab/Consultation), `patient_procedure_id`/`test_id` (FKs, populated only for their matching `item_type`), `unit_cost`/`quantity`/`total_cost`/`covered_amount` | `billing.total_amount` is reconciled to `SUM(total_cost)` per bill by the repair pipeline. |
+| `billing` | `bill_id` (PK), `admission_id` (FK, UNIQUE — one bill per admission), `patient_id`/`payer_id` (FKs), `bill_date`, `total_amount`, `insurance_covered`, `patient_responsibility`, `payment_status` (ENUM) | Bills exist only for **discharged** admissions, dated 0–90 days after discharge (never in the future). `total_amount` is the sum of the bill's line items. |
+| `billing_line_items` | `line_item_id` (PK), `bill_id` (FK), `item_type` (ENUM: Procedure/Medication/Room/Lab/Consultation), `patient_procedure_id`/`test_id` (FKs, populated only for their matching `item_type`), `unit_cost`/`quantity`/`total_cost`/`covered_amount` | Built bottom-up from the bill's *own admission*: its room stay, completed procedures, tests, medications and an optional consultation — so a procedure/lab line always points at that admission's own procedure/test. `billing.total_amount` = `SUM(total_cost)`. |
 
-## Exported CSVs (`app/data/`, produced by `src/export_to_csv.py`)
+## Exported CSVs (`app/data/`, produced by `src/run_pipeline.py` / `src/export_to_csv.py`)
 
 One CSV per table above, plus `icd10_lookup.csv` (`icd10_code` → `diagnosis_name`, built from `icd10_diagnoses.py`) so the dashboard can show human-readable diagnosis names without a DB join.
+
+Validation outputs written alongside them by `src/run_pipeline.py` (read by the Data Quality page):
+
+| File | Contents |
+|---|---|
+| `validation_report.csv` | One row per check (51): group, rule, violations before repair, violations after repair |
+| `validation_report_meta.json` | Scale, run time, admission count, totals |
+| `validation_runs.csv` | One line per scale (small / medium / large): the latest recorded run |
+| `validation_baseline_pre_fix.csv` | The 51 checks run against the dataset produced *before* the realism fixes (a fixed historical artifact, not regenerated) |

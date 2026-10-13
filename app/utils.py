@@ -8,6 +8,7 @@ Colors are assigned by entity/job, never by chart-local rank, so the same
 category always reads the same color across every page.
 """
 
+import json
 import textwrap
 from pathlib import Path
 
@@ -227,6 +228,19 @@ def load_data() -> dict:
     return data
 
 
+@st.cache_data
+def load_validation() -> dict:
+    """Validation outputs written by src/run_pipeline.py (see the Data Quality page)."""
+    with open(DATA_DIR / "validation_report_meta.json", encoding="utf-8") as f:
+        meta = json.load(f)
+    return {
+        "report": pd.read_csv(DATA_DIR / "validation_report.csv"),
+        "meta": meta,
+        "runs": pd.read_csv(DATA_DIR / "validation_runs.csv"),
+        "baseline": pd.read_csv(DATA_DIR / "validation_baseline_pre_fix.csv"),
+    }
+
+
 # ── Formatting helpers ──────────────────────────────────────────────────────
 
 def fmt_currency(x: float) -> str:
@@ -262,6 +276,17 @@ def wrap_label(text: str, width: int = 25, max_lines: int = 2) -> str:
         lines = lines[:max_lines]
         lines[-1] = lines[-1].rstrip() + "…"
     return "<br>".join(lines)
+
+
+CHART_HINT = "Drag to zoom · double-click to reset"
+
+
+def plot(fig, hint: bool = True) -> None:
+    """Render a Plotly figure with the standing drag-to-zoom / double-click-to-reset
+    hint underneath (pass hint=False for charts that can't zoom, e.g. donuts)."""
+    st.plotly_chart(fig, use_container_width=True)
+    if hint:
+        st.caption(CHART_HINT)
 
 
 def render_kpi_row(items: list) -> None:

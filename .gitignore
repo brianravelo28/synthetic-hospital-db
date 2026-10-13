@@ -5,3 +5,4 @@ __pycache__/
 venv/
 .ipynb_checkpoints/
 .streamlit/secrets.toml
+.pytest_cache/

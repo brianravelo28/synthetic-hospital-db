@@ -4,52 +4,60 @@ hospital_generator.py  (constraint-aware)
 Synthetic data generator for hospital_db.
 Populates all 17 tables in topological dependency order.
 
-Constraint-aware patches vs the prior version (targets the actual
-remaining violation drivers — verified against validate_repair.py, not
-just the prior docstring's claims):
+What "constraint-aware" means here — each item exists to avoid a specific
+class of violation caught by src/validate_repair.py (history and measured
+results: docs/METHODOLOGY.md):
 
-  1. gen_admissions — department & admission_type now driven by patient
-     age (newborn / pediatric / adult buckets), eliminating most of
-     Group 2 (age-based) violations at the source.
-  2. gen_admissions — room selection now respects patient_condition via
-     CONDITION_ROOM_MAP, eliminating most of Group 4's
-     condition_room_mismatch violations.
-  3. gen_diagnoses — sample_diagnosis() is now called with a department
-     filter AND a gender/age impossible-code filter (mirrors
-     repair_diagnoses' resample loop), eliminating most of Group 5.
-  4. gen_billing — bill_date is now anchored to discharge_date when one
-     exists, eliminating most of Group 1's bill_before_discharge.
+  Round one (groups 1-6 of the validator)
+    - Admission department & type are driven by patient age.
+    - Room is chosen to suit the patient's condition.
+    - Diagnoses are department-filtered and never gender/age-impossible.
+    - Every department gets at least one doctor (and one room).
 
-NOT changed (already correct previously, verified by reading the code):
-  - diagnosis/procedure/medication/test/triage dates were already
-    constrained to the admission window.
-  - admitting doctor and room were already matched to the admission
-    department.
+  Round two (group 7, the independent realism checks)
+    - Admission status follows from dates: a stay that hasn't ended is
+      "Admitted"; "Scheduled" admissions are in the future; nothing is
+      admitted before the patient was born (newborns are admitted at birth,
+      and only once).
+    - Only admissions that actually happened get clinical records.
+    - Staff only act after their hire date (StaffPool), shifts are in their
+      own department, hires respect a minimum age.
+    - Triage vitals are age-banded.
+    - Bills exist only for discharged admissions and are built bottom-up from
+      that admission's own room stay, procedures, tests and medications, so
+      line items belong to the bill's admission and the total is their sum.
 
-Still left to repair (by design — true edge cases, not systemic):
+Still left to repair (true edge cases):
   - registered_date for newborn patients (patients are generated before
-    admissions exist, so this can't be known at patient-generation time
-    without restructuring the pipeline order; repair_age fixes it cheaply).
-  - condition/room mismatches in departments that lack a room of the
-    condition-appropriate type (falls back to any room in-department).
+    admissions exist, so it can't be known at patient-creation time).
+  - condition/room mismatches in departments with no room of a suitable type
+    (falls back to any room in-department; repair downgrades the condition).
+
+Not modelled: clinical coherence between diagnoses, procedures and
+medications (drawn independently), or a real population/occupancy curve.
 
 Prerequisites:
-    pip install sqlalchemy pymysql faker numpy pandas
-    MySQL running with hospital_db schema already created (hospital_db.sql)
+    pip install -r requirements.txt
+    MySQL/MariaDB running with the hospital_db schema loaded (hospital_db.sql)
     icd10_diagnoses.py in the same directory
+    connection string from HOSPITAL_DB_URL (default: root, no password, localhost)
 
-Usage (Jupyter):
+Usage:
+    python src/run_pipeline.py --size large        # the whole pipeline
+  or, from a notebook:
     exec(open('hospital_generator.py').read())
     main('small')   # or 'medium' / 'large'
 """
 
+import os
 import sys
 import random
 import numpy as np
 import pandas as pd
 from faker import Faker
 from faker.providers import ssn as ssn_provider, BaseProvider, person as person_provider
-from datetime import date, datetime, timedelta
+from bisect import bisect_right
+from datetime import date, datetime, timedelta, time as dtime
 from sqlalchemy import create_engine, text
 from collections import defaultdict
 
@@ -60,7 +68,7 @@ from icd10_diagnoses import sample_diagnosis
 # CONFIGURATION
 # =============================================================================
 
-DB_URL = "mysql+pymysql://root:@localhost/hospital_db"
+DB_URL = os.environ.get("HOSPITAL_DB_URL", "mysql+pymysql://root:@localhost/hospital_db")
 
 SEED = 42
 random.seed(SEED)
@@ -310,8 +318,15 @@ MEDICATIONS_LIST = [
 ADMISSION_TYPES  = ['Emergency', 'Elective', 'Urgent', 'Newborn', 'Scheduled']
 ADMISSION_TYPE_P = [0.30, 0.25, 0.25, 0.08, 0.12]
 
-ADMISSION_STATUSES  = ['Admitted', 'Discharged', 'Scheduled', 'Cancelled']
-ADMISSION_STATUS_P  = [0.20, 0.60, 0.15, 0.05]
+# Each admission is drawn as one of three categories. "Admitted" vs "Discharged"
+# is then decided by the dates: a stay that hasn't ended by now is still
+# in progress (Admitted) — it is not a coin flip, so the census stays small
+# and recent instead of containing stays that began in 2020.
+ADMISSION_CATEGORIES = ['Scheduled', 'Cancelled', 'Completed']
+ADMISSION_CATEGORY_P = [0.05, 0.05, 0.90]
+SCHEDULED_TYPES      = ['Scheduled', 'Elective']
+SCHEDULED_TYPE_P     = [0.50, 0.50]
+MAX_STAY_DAYS        = 45
 
 DISCHARGE_DISPOSITIONS = {
     'options': ['Home', 'Transfer', 'Skilled Nursing Facility', 'Deceased', 'AMA'],
@@ -339,6 +354,9 @@ PEDIATRIC_DEPT_POOL = ['DEP-008', 'DEP-001', 'DEP-002']
 
 NEWBORN_ADM_TYPES   = ['Newborn', 'Emergency', 'Urgent']
 NEWBORN_ADM_TYPE_P  = [0.60, 0.25, 0.15]
+# a patient can only be born once, so only their first admission can be 'Newborn'
+NEWBORN_REPEAT_TYPES  = ['Emergency', 'Urgent']
+NEWBORN_REPEAT_TYPE_P = [0.625, 0.375]
 
 _non_newborn_pairs   = [(t, p) for t, p in zip(ADMISSION_TYPES, ADMISSION_TYPE_P) if t != 'Newborn']
 NON_NEWBORN_TYPES    = [t for t, _ in _non_newborn_pairs]
@@ -416,6 +434,84 @@ def poisson_count(avg: float) -> int:
 def execute_batch(conn, sql: str, rows: list):
     if rows:
         conn.execute(text(sql), rows)
+
+
+# Rough skew of an inpatient population toward older ages (not a real
+# population curve — see docs/METHODOLOGY.md): (min_age, max_age, weight)
+AGE_BANDS = [(0, 0, 0.015), (1, 17, 0.135), (18, 39, 0.200), (40, 64, 0.300), (65, 100, 0.350)]
+
+
+def sample_birth_date() -> date:
+    lo, hi, _ = random.choices(AGE_BANDS, weights=[w for _, _, w in AGE_BANDS])[0]
+    age = random.randint(lo, hi)
+    return date.today() - timedelta(days=int(age * 365.2425) + 1 + random.randint(0, 363))
+
+
+def hire_date_for(birth: date, hire_start: date, min_age_years: int, latest: date = None) -> date:
+    """A hire date no earlier than `min_age_years` after birth (plus a small margin)."""
+    earliest = max(hire_start, birth + timedelta(days=int(min_age_years * 365.25) + 3))
+    return random_date_between(earliest, latest or date.today())
+
+
+class StaffPool:
+    """
+    Staff sorted by hire date, so an event can only be assigned to someone who
+    had already been hired on the event's date (and, optionally, who works in a
+    given department).
+    """
+
+    def __init__(self, rows):                  # rows: [(staff_id, hire_date, department_id)]
+        self.rows  = sorted(rows, key=lambda r: r[1])
+        self.dates = [r[1] for r in self.rows]
+        self.by_dept = defaultdict(list)
+        for r in self.rows:
+            self.by_dept[r[2]].append(r)
+        self.dept_dates = {d: [r[1] for r in rs] for d, rs in self.by_dept.items()}
+
+    def _scope(self, dept):
+        if dept and self.by_dept.get(dept):
+            return self.by_dept[dept], self.dept_dates[dept]
+        return self.rows, self.dates
+
+    def pick(self, on_date, dept=None) -> str:
+        if isinstance(on_date, datetime):
+            on_date = on_date.date()
+        rows, dates = self._scope(dept)
+        n = bisect_right(dates, on_date)
+        return random.choice(rows[:n] if n else rows[:1])[0]
+
+    def pick_with_date(self, on_dt: datetime, dept):
+        """Pick a department member hired by `on_dt`; if none was yet, use the
+        earliest hire and push the date forward to their start."""
+        rows, dates = self._scope(dept)
+        n = bisect_right(dates, on_dt.date())
+        if n:
+            return random.choice(rows[:n])[0], on_dt
+        return rows[0][0], max(on_dt, datetime.combine(rows[0][1], dtime(8, 0)))
+
+
+def _vitals_for_age(age: int) -> dict:
+    """Plausible (min, max) ranges by age band: height cm, weight kg, HR, RR, BP."""
+    if age <= 1:
+        return dict(h=(45, 80),   w=(2.5, 11),  hr=(100, 160), rr=(30, 53), sbp=(70, 100),  dbp=(40, 65))
+    if age <= 12:
+        return dict(h=(85, 155),  w=(12, 50),   hr=(70, 130),  rr=(18, 30), sbp=(90, 120),  dbp=(55, 80))
+    if age <= 17:
+        return dict(h=(150, 190), w=(40, 90),   hr=(55, 110),  rr=(12, 22), sbp=(100, 135), dbp=(60, 85))
+    return dict(h=(140, 200),     w=(45, 150),  hr=(50, 140),  rr=(12, 28), sbp=(90, 180),  dbp=(50, 110))
+
+
+# room_type -> (min, max daily rate, bill description)
+ROOM_RATES = {
+    'Standard':  (800, 1400,  'Standard Room (per day)'),
+    'Private':   (1200, 2000, 'Private Room (per day)'),
+    'ICU':       (2500, 3500, 'ICU Room (per day)'),
+    'NICU':      (2500, 3500, 'NICU Bed (per day)'),
+    'OR':        (2000, 3000, 'Operating Room Recovery (per day)'),
+    'ER':        (800, 1200,  'ER Bay (per visit)'),
+    'Recovery':  (1000, 1600, 'Recovery Room (per day)'),
+    'Isolation': (1500, 2200, 'Isolation Room (per day)'),
+}
 
 
 def _sample_valid_diagnosis(dept_name: str, gender: str, age: int) -> dict:
@@ -523,7 +619,7 @@ def gen_patients(conn, cfg: dict) -> list:
     for _ in range(cfg['patients']):
         pid     = gen_id("PAT")
         gender  = np.random.choice(['M', 'F', 'NB'], p=[0.48, 0.48, 0.04])
-        dob     = fake.date_of_birth(minimum_age=0, maximum_age=100)
+        dob     = sample_birth_date()
         age     = age_from_dob(dob)
         country = np.random.choice(['USA', fake.country_code()], p=[0.97, 0.03])
         state   = np.random.choice(states, p=state_probs) if country == 'USA' else 'N/A'
@@ -544,7 +640,7 @@ def gen_patients(conn, cfg: dict) -> list:
             "state":           state,
             "zip_code":        fake.postcode()[:10],
             "country":         country,
-            "registered_date": random_date_between(reg_start, reg_end),
+            "registered_date": random_date_between(max(reg_start, dob), reg_end),
         })
         patient_ids.append(pid)
 
@@ -564,57 +660,53 @@ def gen_doctors(conn, cfg: dict, dept_ids: list) -> list:
     rows       = []
     doctor_ids = []
     hire_start = date(2000, 1, 1)
+    window_open = date(2019, 12, 31)       # admissions start 2020-01-01
 
-    for _ in range(cfg['doctors']):
-        did       = gen_id("DOC")
-        gender    = np.random.choice(['M', 'F', 'NB'], p=[0.55, 0.42, 0.03])
-        specialty = random.choice(DOCTOR_SPECIALTIES)
-        dept_id   = random.choice(SPECIALTY_TO_DEPARTMENT.get(specialty, dept_ids))
-
-        rows.append({
-            "doctor_id":     did,
+    def make_doctor(specialty, dept_id, early=False):
+        gender = np.random.choice(['M', 'F', 'NB'], p=[0.55, 0.42, 0.03])
+        birth  = fake.date_of_birth(minimum_age=45 if early else 28, maximum_age=70)
+        return {
+            "doctor_id":     gen_id("DOC"),
             "first_name":    gender_name(gender),
             "last_name":     fake.last_name(),
-            "birth_date":    fake.date_of_birth(minimum_age=28, maximum_age=70),
+            "birth_date":    birth,
             "gender":        gender,
             "contact":       fake.phone_number()[:20],
             "specialty":     specialty,
             "department_id": dept_id,
-            "hire_date":     random_date_between(hire_start, date.today()),
-        })
-        doctor_ids.append(did)
+            "hire_date":     hire_date_for(birth, hire_start, 25, window_open if early else None),
+        }
+
+    for _ in range(cfg['doctors']):
+        specialty = random.choice(DOCTOR_SPECIALTIES)
+        dept_id   = random.choice(SPECIALTY_TO_DEPARTMENT.get(specialty, dept_ids))
+        rows.append(make_doctor(specialty, dept_id))
 
     # Guarantee at least one doctor per department (mirrors gen_rooms'
-    # guarantee below) — otherwise departments with no doctors produce
+    # guarantee) — otherwise departments with no doctors produce
     # doctor_dept_mismatch violations that repair_department can never
     # fix, since it has no doctor in that department to reassign to.
     assigned_depts = {r["department_id"] for r in rows}
-    missing_depts  = [d for d in dept_ids if d not in assigned_depts]
-
     dept_to_specialties = defaultdict(list)
     for specialty, depts in SPECIALTY_TO_DEPARTMENT.items():
         for d in depts:
             dept_to_specialties[d].append(specialty)
 
-    for dept_id in missing_depts:
-        did       = gen_id("DOC")
-        gender    = np.random.choice(['M', 'F', 'NB'], p=[0.55, 0.42, 0.03])
+    for dept_id in [d for d in dept_ids if d not in assigned_depts]:
         specialty = random.choice(dept_to_specialties.get(dept_id) or DOCTOR_SPECIALTIES)
-
-        rows.append({
-            "doctor_id":     did,
-            "first_name":    gender_name(gender),
-            "last_name":     fake.last_name(),
-            "birth_date":    fake.date_of_birth(minimum_age=28, maximum_age=70),
-            "gender":        gender,
-            "contact":       fake.phone_number()[:20],
-            "specialty":     specialty,
-            "department_id": dept_id,
-            "hire_date":     random_date_between(hire_start, date.today()),
-        })
-        doctor_ids.append(did)
+        rows.append(make_doctor(specialty, dept_id, early=True))
         print(f"    Guaranteed doctor added for {dept_id}")
 
+    # ...and make sure every department has someone hired before the data
+    # window opens, so early admissions can always be assigned a doctor who
+    # had actually started work by then.
+    for dept_id in dept_ids:
+        members = [r for r in rows if r["department_id"] == dept_id]
+        if members and not any(r["hire_date"] <= window_open for r in members):
+            old = make_doctor(members[0]["specialty"], dept_id, early=True)
+            members[0].update(birth_date=old["birth_date"], hire_date=old["hire_date"])
+
+    doctor_ids = [r["doctor_id"] for r in rows]
     execute_batch(conn, sql, rows)
     print(f"    {len(doctor_ids)} doctors inserted")
     return doctor_ids
@@ -638,17 +730,18 @@ def gen_nurses(conn, cfg: dict, dept_ids: list) -> list:
         position     = random.choice(NURSE_POSITIONS)
         dept_options = NURSE_POSITION_TO_DEPARTMENT.get(position)
         dept_id      = random.choice(dept_options if dept_options else dept_ids)
+        birth        = fake.date_of_birth(minimum_age=22, maximum_age=65)
 
         rows.append({
             "nurse_id":      nid,
             "first_name":    gender_name(gender),
             "last_name":     fake.last_name(),
-            "birth_date":    fake.date_of_birth(minimum_age=22, maximum_age=65),
+            "birth_date":    birth,
             "gender":        gender,
             "contact":       fake.phone_number()[:20],
             "position":      position,
             "department_id": dept_id,
-            "hire_date":     random_date_between(hire_start, date.today()),
+            "hire_date":     hire_date_for(birth, hire_start, 21),
         })
         nurse_ids.append(nid)
 
@@ -772,15 +865,19 @@ def gen_rooms(conn, cfg: dict, dept_ids: list) -> list:
     return room_ids
 
 
-def _load_patient_ages(conn) -> dict:
-    """{patient_id: age} lookup, used to drive age-aware admissions."""
-    result = conn.execute(text("SELECT patient_id, age FROM patients"))
-    return {row[0]: row[1] for row in result}
+def _load_patient_info(conn) -> dict:
+    """{patient_id: (age, birth_date)} — drives age-aware, birth-aware admissions."""
+    result = conn.execute(text("SELECT patient_id, age, birth_date FROM patients"))
+    return {row[0]: (row[1], row[2]) for row in result}
 
 
-def gen_admissions(conn, cfg: dict, patient_ids: list,
-                   doctor_ids: list, dept_ids: list,
-                   patient_age_map: dict) -> list:
+def _load_staff_pool(conn, table: str, id_col: str) -> StaffPool:
+    result = conn.execute(text(f"SELECT {id_col}, hire_date, department_id FROM {table}"))
+    return StaffPool([(r[0], r[1], r[2]) for r in result])
+
+
+def gen_admissions(conn, cfg: dict, patient_ids: list, dept_ids: list,
+                   patient_info: dict, doctor_pool: StaffPool) -> list:
     print(f"  Generating {cfg['admissions']} admissions...")
     sql = """INSERT INTO admissions
              (admission_id, patient_id, admitting_doctor_id, department_id,
@@ -792,12 +889,7 @@ def gen_admissions(conn, cfg: dict, patient_ids: list,
                      :admission_status, :discharge_disposition, :patient_condition,
                      :length_of_stay)"""
 
-    # Build dept -> doctor, dept -> room, and dept -> room_type -> room lookups
-    result = conn.execute(text("SELECT doctor_id, department_id FROM doctors"))
-    dept_doctor_map = defaultdict(list)
-    for row in result:
-        dept_doctor_map[row[1]].append(row[0])
-
+    # Build dept -> room and dept -> room_type -> room lookups
     result = conn.execute(text("SELECT room_id, department_id, room_type FROM rooms"))
     dept_room_map      = defaultdict(list)
     dept_room_type_map = defaultdict(lambda: defaultdict(list))
@@ -808,37 +900,79 @@ def gen_admissions(conn, cfg: dict, patient_ids: list,
     # Adult pool excludes Pediatrics so adults never land in DEP-008
     adult_dept_pool = [d for d in dept_ids if d != 'DEP-008']
 
-    adm_start = datetime(2020, 1, 1)
-    adm_end   = datetime.now()
-    rows      = []
-    adm_ids   = []
+    adm_start    = datetime(2020, 1, 1)
+    now          = datetime.now()
+    latest_past  = now - timedelta(minutes=5)
+    newborn_done = set()
+    rows         = []
+    adm_ids      = []
 
     for _ in range(cfg['admissions']):
-        aid        = gen_id("ADM")
-        patient_id = random.choice(patient_ids)
-        age        = patient_age_map.get(patient_id, 30)
+        aid          = gen_id("ADM")
+        patient_id   = random.choice(patient_ids)
+        age, dob     = patient_info[patient_id]
+        category     = np.random.choice(ADMISSION_CATEGORIES, p=ADMISSION_CATEGORY_P)
 
-        # Department & admission_type driven by patient age
+        # Department driven by patient age
         if age == 0:
-            dept_id  = random.choice(NEWBORN_DEPT_POOL)
-            adm_type = np.random.choice(NEWBORN_ADM_TYPES, p=NEWBORN_ADM_TYPE_P)
+            dept_id = random.choice(NEWBORN_DEPT_POOL)
         elif age <= 17:
-            dept_id  = random.choice(PEDIATRIC_DEPT_POOL)
-            adm_type = np.random.choice(NON_NEWBORN_TYPES, p=NON_NEWBORN_TYPE_P)
+            dept_id = random.choice(PEDIATRIC_DEPT_POOL)
         else:
-            dept_id  = random.choice(adult_dept_pool)
-            adm_type = np.random.choice(NON_NEWBORN_TYPES, p=NON_NEWBORN_TYPE_P)
+            dept_id = random.choice(adult_dept_pool)
 
-        status    = np.random.choice(ADMISSION_STATUSES, p=ADMISSION_STATUS_P)
-        adm_dt    = random_datetime_between(adm_start, adm_end)
+        # Admission type: Newborn only for a newborn's first completed admission
+        if category == 'Scheduled':
+            adm_type = np.random.choice(SCHEDULED_TYPES, p=SCHEDULED_TYPE_P)
+        elif age == 0 and category == 'Completed':
+            if patient_id in newborn_done:
+                adm_type = np.random.choice(NEWBORN_REPEAT_TYPES, p=NEWBORN_REPEAT_TYPE_P)
+            else:
+                adm_type = np.random.choice(NEWBORN_ADM_TYPES, p=NEWBORN_ADM_TYPE_P)
+        else:
+            adm_type = np.random.choice(NON_NEWBORN_TYPES, p=NON_NEWBORN_TYPE_P)
+        if adm_type == 'Newborn':
+            newborn_done.add(patient_id)
+
+        # Admission date: scheduled ones are in the future; everything else is
+        # in the past and never before the patient was born (newborns are
+        # admitted at birth).
+        if category == 'Scheduled':
+            adm_dt = random_datetime_between(now + timedelta(days=1), now + timedelta(days=90))
+        elif adm_type == 'Newborn':
+            adm_dt = datetime.combine(dob, dtime(8, 0)) + timedelta(hours=random.randint(0, 40))
+        else:
+            adm_dt = random_datetime_between(
+                max(adm_start, datetime.combine(dob, dtime(0, 0))), latest_past
+            )
+
+        # Doctor matched to the admission department AND already hired
+        doc_id, adm_dt = doctor_pool.pick_with_date(adm_dt, dept_id)
+        if category != 'Scheduled' and adm_dt > latest_past:
+            adm_dt = latest_past
+
         condition = np.random.choice(
                         ['Minimal', 'Moderate', 'Maximum', 'Intensive'],
                         p=[0.15, 0.40, 0.30, 0.15]
                     )
 
-        # Doctor matched to admission department
-        dept_docs = dept_doctor_map.get(dept_id, doctor_ids)
-        doc_id    = random.choice(dept_docs if dept_docs else doctor_ids)
+        # Status follows from the dates
+        los, dis_dt, dis_dsp = None, None, 'Still Admitted'
+        if category == 'Scheduled':
+            status = 'Scheduled'
+        elif category == 'Cancelled':
+            status = 'Cancelled'
+        else:
+            los    = min(max(1, int(np.random.exponential(scale=5))), MAX_STAY_DAYS)
+            dis_dt = adm_dt + timedelta(days=los)
+            if dis_dt > now:                   # stay hasn't ended yet
+                status, los, dis_dt = 'Admitted', None, None
+            else:
+                status  = 'Discharged'
+                dis_dsp = np.random.choice(
+                              DISCHARGE_DISPOSITIONS['options'],
+                              p=DISCHARGE_DISPOSITIONS['probs']
+                          )
 
         # Room matched to admission department AND patient_condition
         dept_rooms = dept_room_map.get(dept_id, [])
@@ -850,16 +984,6 @@ def gen_admissions(conn, cfg: dict, patient_ids: list,
                 for rid in dept_room_type_map.get(dept_id, {}).get(rt, [])
             ]
             room_id = random.choice(candidates) if candidates else random.choice(dept_rooms)
-
-        if status == 'Discharged':
-            los    = max(1, int(np.random.exponential(scale=5)))
-            dis_dt = min(adm_dt + timedelta(days=los), datetime.now())
-            dis_dsp = np.random.choice(
-                          DISCHARGE_DISPOSITIONS['options'],
-                          p=DISCHARGE_DISPOSITIONS['probs']
-                      )
-        else:
-            los, dis_dt, dis_dsp = None, None, 'Still Admitted'
 
         rows.append({
             "admission_id":          aid,
@@ -898,24 +1022,27 @@ def _load_admission_windows(conn) -> tuple:
 
 def _load_admission_clinical_info(conn) -> dict:
     """
-    {admission_id: {dept_name, gender, age}} — used by gen_diagnoses
-    to sample department-appropriate, gender/age-valid ICD-10 codes.
+    {admission_id: {dept_name, gender, age, status, admission_type}} — used to
+    sample department-appropriate, gender/age-valid ICD-10 codes, age-banded
+    vitals, and to decide which admissions get clinical records at all.
     """
     result = conn.execute(text("""
-        SELECT a.admission_id, dpt.dep_name, p.gender, p.age
+        SELECT a.admission_id, dpt.dep_name, p.gender, p.age,
+               a.admission_status, a.admission_type
         FROM admissions a
         JOIN departments dpt ON a.department_id = dpt.department_id
         JOIN patients p      ON a.patient_id    = p.patient_id
     """))
     info_map = {}
     for row in result:
-        info_map[row[0]] = {"dept_name": row[1], "gender": row[2], "age": row[3]}
+        info_map[row[0]] = {"dept_name": row[1], "gender": row[2], "age": row[3],
+                            "status": row[4], "admission_type": row[5]}
     return info_map
 
 
-def gen_triage(conn, admission_ids: list, nurse_ids: list,
+def gen_triage(conn, clinical_ids: list, nurse_pool: StaffPool, adm_info_map: dict,
                adm_dt_map: dict, dis_dt_map: dict):
-    target = [a for a in admission_ids if random.random() < 0.80]
+    target = [a for a in clinical_ids if random.random() < 0.80]
     print(f"  Generating triage for {len(target)} admissions...")
     sql = """INSERT INTO triage
              (triage_id, admission_id, nurse_id, triage_datetime,
@@ -927,36 +1054,43 @@ def gen_triage(conn, admission_ids: list, nurse_ids: list,
                      :respiratory_rate, :oxygen_saturation, :height_cm, :weight_kg,
                      :pain_level, :chief_complaint, :acuity_level)"""
 
+    acuity_p = [0.05, 0.20, 0.40, 0.25, 0.10]
     rows = []
     for adm_id in target:
-        adm_dt = adm_dt_map.get(adm_id, datetime.now())
-        dis_dt = dis_dt_map.get(adm_id)
+        adm_dt    = adm_dt_map[adm_id]
+        dis_dt    = dis_dt_map.get(adm_id)
+        info      = adm_info_map[adm_id]
+        v         = _vitals_for_age(info['age'])
+        triage_dt = datetime_within_admission(adm_dt, dis_dt)
+
+        if info['admission_type'] == 'Emergency':      # ESI 1-3 only
+            acuity = np.random.choice([1, 2, 3], p=[p / sum(acuity_p[:3]) for p in acuity_p[:3]])
+        else:
+            acuity = np.random.choice([1, 2, 3, 4, 5], p=acuity_p)
+
         rows.append({
             "triage_id":         gen_id("TRI"),
             "admission_id":      adm_id,
-            "nurse_id":          random.choice(nurse_ids),
-            "triage_datetime":   datetime_within_admission(adm_dt, dis_dt),
-            "bp_systolic":       random.randint(90, 180),
-            "bp_diastolic":      random.randint(50, 110),
-            "heart_rate":        random.randint(50, 140),
+            "nurse_id":          nurse_pool.pick(triage_dt),
+            "triage_datetime":   triage_dt,
+            "bp_systolic":       random.randint(*v['sbp']),
+            "bp_diastolic":      random.randint(*v['dbp']),
+            "heart_rate":        random.randint(*v['hr']),
             "temperature":       round(random.uniform(97.0, 103.5), 1),
-            "respiratory_rate":  random.randint(12, 28),
+            "respiratory_rate":  random.randint(*v['rr']),
             "oxygen_saturation": random.randint(88, 100),
-            "height_cm":         random.randint(140, 200),
-            "weight_kg":         round(random.uniform(45.0, 150.0), 1),
+            "height_cm":         random.randint(*v['h']),
+            "weight_kg":         round(random.uniform(*v['w']), 1),
             "pain_level":        random.randint(0, 10),
             "chief_complaint":   random.choice(CHIEF_COMPLAINTS),
-            "acuity_level":      np.random.choice(
-                                     [1, 2, 3, 4, 5],
-                                     p=[0.05, 0.20, 0.40, 0.25, 0.10]
-                                 ),
+            "acuity_level":      acuity,
         })
 
     execute_batch(conn, sql, rows)
     print(f"    {len(rows)} triage records inserted")
 
 
-def gen_diagnoses(conn, cfg: dict, admission_ids: list, doctor_ids: list,
+def gen_diagnoses(conn, cfg: dict, admission_ids: list, doctor_pool: StaffPool,
                   adm_dt_map: dict, dis_dt_map: dict, adm_info_map: dict):
     print(f"  Generating diagnoses...")
     sql = """INSERT INTO diagnoses
@@ -982,12 +1116,13 @@ def gen_diagnoses(conn, cfg: dict, admission_ids: list, doctor_ids: list,
                           ['Secondary', 'Tertiary', 'Complication'],
                           p=[0.50, 0.25, 0.25]
                       )
+            dx_date = date_within_admission(adm_dt, dis_dt)
             rows.append({
                 "diagnosis_id":   gen_id("DXX"),
                 "admission_id":   adm_id,
-                "doctor_id":      random.choice(doctor_ids),
+                "doctor_id":      doctor_pool.pick(dx_date),
                 "icd10_code":     dx['icd10_code'],
-                "diagnosis_date": date_within_admission(adm_dt, dis_dt),
+                "diagnosis_date": dx_date,
                 "diagnosis_type": dx_type,
             })
 
@@ -996,7 +1131,7 @@ def gen_diagnoses(conn, cfg: dict, admission_ids: list, doctor_ids: list,
 
 
 def gen_patient_procedures(conn, cfg: dict, admission_ids: list,
-                           doctor_ids: list, adm_dt_map: dict,
+                           doctor_pool: StaffPool, adm_dt_map: dict,
                            dis_dt_map: dict) -> list:
     print(f"  Generating patient procedures...")
     sql = """INSERT INTO patient_procedures
@@ -1017,13 +1152,14 @@ def gen_patient_procedures(conn, cfg: dict, admission_ids: list,
         count  = poisson_count(cfg['avg_procedures'])
 
         for _ in range(count):
-            ppid = gen_id("PRP")
+            ppid    = gen_id("PRP")
+            pp_date = datetime_within_admission(adm_dt, dis_dt)
             rows.append({
                 "patient_procedure_id": ppid,
                 "admission_id":         adm_id,
                 "procedure_id":         random.choice(proc_ids),
-                "doctor_id":            random.choice(doctor_ids),
-                "procedure_date":       datetime_within_admission(adm_dt, dis_dt),
+                "doctor_id":            doctor_pool.pick(pp_date),
+                "procedure_date":       pp_date,
                 "procedure_status":     np.random.choice(pp_statuses, p=pp_status_p),
                 "notes":                None,
             })
@@ -1034,7 +1170,7 @@ def gen_patient_procedures(conn, cfg: dict, admission_ids: list,
     return pp_ids
 
 
-def gen_medications(conn, cfg: dict, admission_ids: list, doctor_ids: list,
+def gen_medications(conn, cfg: dict, admission_ids: list, doctor_pool: StaffPool,
                     adm_dt_map: dict, dis_dt_map: dict):
     print(f"  Generating medications...")
     sql = """INSERT INTO medications
@@ -1064,7 +1200,7 @@ def gen_medications(conn, cfg: dict, admission_ids: list, doctor_ids: list,
             rows.append({
                 "medication_id": gen_id("MED"),
                 "admission_id":  adm_id,
-                "doctor_id":     random.choice(doctor_ids),
+                "doctor_id":     doctor_pool.pick(start),
                 "drug_name":     med["drug_name"],
                 "dosage":        med["dosage"],
                 "frequency":     med["frequency"],
@@ -1078,7 +1214,7 @@ def gen_medications(conn, cfg: dict, admission_ids: list, doctor_ids: list,
 
 
 def gen_medical_tests(conn, cfg: dict, admission_ids: list,
-                      doctor_ids: list, nurse_ids: list,
+                      doctor_pool: StaffPool, nurse_pool: StaffPool,
                       adm_dt_map: dict, dis_dt_map: dict) -> list:
     print(f"  Generating medical tests...")
     sql = """INSERT INTO medical_tests
@@ -1130,8 +1266,8 @@ def gen_medical_tests(conn, cfg: dict, admission_ids: list,
             rows.append({
                 "test_id":       tid,
                 "admission_id":  adm_id,
-                "doctor_id":     random.choice(doctor_ids),
-                "nurse_id":      random.choice(nurse_ids) if random.random() > 0.3 else None,
+                "doctor_id":     doctor_pool.pick(test_dt),
+                "nurse_id":      nurse_pool.pick(test_dt) if random.random() > 0.3 else None,
                 "test_name":     test_nm,
                 "test_category": category,
                 "test_date":     test_dt,
@@ -1146,8 +1282,7 @@ def gen_medical_tests(conn, cfg: dict, admission_ids: list,
     return test_ids
 
 
-def gen_staff_shifts(conn, cfg: dict, doctor_ids: list,
-                     nurse_ids: list, employee_ids: list, dept_ids: list):
+def gen_staff_shifts(conn, cfg: dict, dept_ids: list):
     print(f"  Generating staff shifts...")
     sql = """INSERT INTO staff_shifts
              (shift_id, staff_id, staff_type, department_id,
@@ -1160,20 +1295,21 @@ def gen_staff_shifts(conn, cfg: dict, doctor_ids: list,
     n           = cfg['shifts_per_staff']
     rows        = []
 
-    staff_pool = (
-        [(did, 'Doctor')   for did in doctor_ids] +
-        [(nid, 'Nurse')    for nid in nurse_ids]  +
-        [(eid, 'Employee') for eid in employee_ids]
-    )
+    staff = []
+    for table, id_col, staff_type in [('doctors', 'doctor_id', 'Doctor'),
+                                      ('nurses', 'nurse_id', 'Nurse'),
+                                      ('employees', 'employee_id', 'Employee')]:
+        result = conn.execute(text(f"SELECT {id_col}, department_id, hire_date FROM {table}"))
+        staff += [(r[0], staff_type, r[1], r[2]) for r in result]
 
-    for staff_id, staff_type in staff_pool:
+    for staff_id, staff_type, home_dept, hire_date in staff:
         for _ in range(n):
             rows.append({
                 "shift_id":      gen_id("SHF"),
                 "staff_id":      staff_id,
                 "staff_type":    staff_type,
-                "department_id": random.choice(dept_ids),
-                "shift_date":    random_date_between(shift_start, shift_end),
+                "department_id": home_dept or random.choice(dept_ids),
+                "shift_date":    random_date_between(max(shift_start, hire_date), shift_end),
                 "shift_type":    random.choice(SHIFT_TYPES),
                 "hours_worked":  random.choice([8.0, 10.0, 12.0]),
             })
@@ -1182,137 +1318,123 @@ def gen_staff_shifts(conn, cfg: dict, doctor_ids: list,
     print(f"    {len(rows)} staff shifts inserted")
 
 
-def gen_billing(conn, patient_ids_map: dict, payer_ids: list, dis_dt_map: dict) -> dict:
+def gen_billing(conn):
+    """
+    One bill per discharged admission, built bottom-up from that admission's own
+    room stay, completed procedures, tests, medications and a consultation —
+    so line items always belong to the bill's admission and the bill total is
+    the sum of its line items (no reconciliation needed afterwards).
+    """
     print(f"  Generating billing records...")
-    sql = """INSERT INTO billing
+    bill_sql = """INSERT INTO billing
              (bill_id, admission_id, patient_id, payer_id, bill_date,
               due_date, total_amount, insurance_covered, patient_responsibility,
               payment_status, payment_date)
              VALUES (:bill_id, :admission_id, :patient_id, :payer_id, :bill_date,
                      :due_date, :total_amount, :insurance_covered,
                      :patient_responsibility, :payment_status, :payment_date)"""
-
-    pmt_statuses = ['Pending', 'Partial', 'Paid', 'Denied', 'Write-Off']
-    pmt_status_p = [0.20, 0.15, 0.50, 0.10, 0.05]
-    rows         = []
-    bill_map     = {}
-
-    for adm_id, pat_id in patient_ids_map.items():
-        bid        = gen_id("BIL")
-        payer      = random.choice(PAYERS_DATA)
-        payer_id   = payer["payer_id"]
-        payer_type = payer["payer_type"]
-        coverage   = PAYER_COVERAGE[payer_type]
-        total      = round(random.uniform(500, 45000), 2)
-        ins_cov    = round(total * coverage, 2)
-        pat_resp   = round(total - ins_cov, 2)
-
-        # Anchor bill_date to discharge_date when one exists, so
-        # billing never predates discharge (Group 1 bill_before_discharge)
-        dis_dt = dis_dt_map.get(adm_id)
-        if dis_dt:
-            window_start = dis_dt.date() if isinstance(dis_dt, datetime) else dis_dt
-            window_end   = max(window_start, min(window_start + timedelta(days=90), date.today()))
-            bill_dt      = random_date_between(window_start, window_end)
-        else:
-            bill_dt = fake.date_between(start_date='-3y', end_date='today')
-
-        due_dt     = bill_dt + timedelta(days=30)
-        pmt_status = np.random.choice(pmt_statuses, p=pmt_status_p)
-        pmt_date   = (bill_dt + timedelta(days=random.randint(5, 90))) \
-                     if pmt_status == 'Paid' else None
-
-        rows.append({
-            "bill_id":                bid,
-            "admission_id":           adm_id,
-            "patient_id":             pat_id,
-            "payer_id":               payer_id,
-            "bill_date":              bill_dt,
-            "due_date":               due_dt,
-            "total_amount":           total,
-            "insurance_covered":      ins_cov,
-            "patient_responsibility": pat_resp,
-            "payment_status":         pmt_status,
-            "payment_date":           pmt_date,
-        })
-        bill_map[bid] = payer_type
-
-    execute_batch(conn, sql, rows)
-    print(f"    {len(rows)} billing records inserted")
-    return bill_map
-
-
-def gen_billing_line_items(conn, bill_map: dict,
-                           pp_ids: list, test_ids: list):
-    print(f"  Generating billing line items...")
-    sql = """INSERT INTO billing_line_items
+    item_sql = """INSERT INTO billing_line_items
              (line_item_id, bill_id, item_type, patient_procedure_id,
               test_id, description, quantity, unit_cost, total_cost, covered_amount)
              VALUES (:line_item_id, :bill_id, :item_type, :patient_procedure_id,
                      :test_id, :description, :quantity, :unit_cost,
                      :total_cost, :covered_amount)"""
 
-    item_types  = ['Procedure', 'Medication', 'Room', 'Lab', 'Consultation']
-    item_type_p = [0.25, 0.20, 0.25, 0.20, 0.10]
-    pp_pool     = pp_ids   if pp_ids   else [None]
-    tst_pool    = test_ids if test_ids else [None]
+    procs, tests, meds = defaultdict(list), defaultdict(list), defaultdict(list)
+    for r in conn.execute(text("""
+            SELECT pp.admission_id, pp.patient_procedure_id, pr.procedure_name, pr.base_cost
+            FROM patient_procedures pp JOIN procedures pr ON pr.procedure_id = pp.procedure_id
+            WHERE pp.procedure_status = 'Completed'""")):
+        procs[r[0]].append(r[1:])
+    for r in conn.execute(text("SELECT admission_id, test_id, test_name, cost FROM medical_tests")):
+        tests[r[0]].append(r[1:])
+    for r in conn.execute(text("SELECT admission_id, drug_name, dosage FROM medications")):
+        meds[r[0]].append(r[1:])
 
-    room_descs   = ['Standard Room (per day)', 'Private Room (per day)',
-                    'ICU Room (per day)', 'ER Bay (per visit)']
+    admissions = conn.execute(text("""
+        SELECT a.admission_id, a.patient_id, a.length_of_stay, a.discharge_date, r.room_type
+        FROM admissions a LEFT JOIN rooms r ON r.room_id = a.room_id
+        WHERE a.admission_status = 'Discharged'""")).fetchall()
+
     consult_desc = ['Specialist Consultation', 'Initial Consultation',
                     'Follow-up Consultation', 'Telemedicine Consultation']
+    pmt_statuses = ['Pending', 'Partial', 'Paid', 'Denied', 'Write-Off']
+    pmt_status_p = [0.20, 0.15, 0.50, 0.10, 0.05]
+    today        = date.today()
+    bill_rows, item_rows = [], []
 
-    rows = []
-    for bill_id, payer_type in bill_map.items():
-        coverage = PAYER_COVERAGE[payer_type]
-        n_items  = random.randint(2, 6)
+    for adm_id, pat_id, los, dis_dt, room_type in admissions:
+        bid        = gen_id("BIL")
+        payer      = random.choice(PAYERS_DATA)
+        coverage   = PAYER_COVERAGE[payer["payer_type"]]
+        pmt_status = np.random.choice(pmt_statuses, p=pmt_status_p)
+        cover_f    = 0.0 if pmt_status == 'Denied' else coverage
 
-        for _ in range(n_items):
-            item_type = np.random.choice(item_types, p=item_type_p)
-            qty       = 1
-            pp_id     = None
-            t_id      = None
+        # (item_type, procedure_id, test_id, description, qty, unit_cost)
+        items = []
+        lo, hi, room_desc = ROOM_RATES.get(room_type, ROOM_RATES['Standard'])
+        items.append(('Room', None, None, room_desc,
+                      1 if room_type == 'ER' else max(1, los or 1), round(random.uniform(lo, hi), 2)))
+        for pp_id, name, base_cost in procs.get(adm_id, []):
+            items.append(('Procedure', pp_id, None, name, 1,
+                          round(float(base_cost) * random.uniform(0.9, 1.1), 2)))
+        for t_id, name, cost in tests.get(adm_id, []):
+            items.append(('Lab', None, t_id, name, 1, float(cost)))
+        for drug, dosage in meds.get(adm_id, []):
+            items.append(('Medication', None, None, f"{drug} {dosage}",
+                          random.randint(1, max(2, min(30, (los or 1) * 3))),
+                          round(random.uniform(5, 250), 2)))
+        if random.random() < 0.7:
+            items.append(('Consultation', None, None, random.choice(consult_desc), 1,
+                          round(random.uniform(200, 800), 2)))
 
-            if item_type == 'Procedure':
-                pp_id       = random.choice(pp_pool)
-                proc        = random.choice(PROCEDURES_DATA)
-                description = proc["procedure_name"]
-                unit_cost   = round(proc["base_cost"] * random.uniform(0.9, 1.1), 2)
-            elif item_type == 'Lab':
-                t_id        = random.choice(tst_pool)
-                description = 'Laboratory test'
-                unit_cost   = round(random.uniform(80, 2500), 2)
-            elif item_type == 'Medication':
-                med         = random.choice(MEDICATIONS_LIST)
-                description = f"{med['drug_name']} {med['dosage']}"
-                qty         = random.randint(1, 30)
-                unit_cost   = round(random.uniform(5, 250), 2)
-            elif item_type == 'Room':
-                description = random.choice(room_descs)
-                qty         = random.randint(1, 14)
-                unit_cost   = round(random.uniform(800, 3500), 2)
-            else:
-                description = random.choice(consult_desc)
-                unit_cost   = round(random.uniform(200, 800), 2)
-
-            total_cost     = round(unit_cost * qty, 2)
-            covered_amount = round(total_cost * coverage, 2)
-
-            rows.append({
+        total = 0.0
+        for item_type, pp_id, t_id, desc, qty, unit_cost in items:
+            total_cost = round(unit_cost * qty, 2)
+            total     += total_cost
+            item_rows.append({
                 "line_item_id":         gen_id("LIN"),
-                "bill_id":              bill_id,
+                "bill_id":              bid,
                 "item_type":            item_type,
                 "patient_procedure_id": pp_id,
                 "test_id":              t_id,
-                "description":          description,
+                "description":          desc,
                 "quantity":             qty,
                 "unit_cost":            unit_cost,
                 "total_cost":           total_cost,
-                "covered_amount":       covered_amount,
+                "covered_amount":       round(total_cost * cover_f, 2),
             })
+        total   = round(total, 2)
+        ins_cov = round(total * cover_f, 2)
+        pat_res = 0.0 if pmt_status == 'Write-Off' else round(total - ins_cov, 2)
 
-    execute_batch(conn, sql, rows)
-    print(f"    {len(rows)} billing line items inserted")
+        # billed 0-90 days after discharge, never in the future
+        start    = dis_dt.date() if isinstance(dis_dt, datetime) else dis_dt
+        bill_dt  = random_date_between(start, max(start, min(start + timedelta(days=90), today)))
+        pmt_date = min(bill_dt + timedelta(days=random.randint(5, 90)), today) \
+                   if pmt_status == 'Paid' else None
+
+        bill_rows.append({
+            "bill_id":                bid,
+            "admission_id":           adm_id,
+            "patient_id":             pat_id,
+            "payer_id":               payer["payer_id"],
+            "bill_date":              bill_dt,
+            "due_date":               bill_dt + timedelta(days=30),
+            "total_amount":           total,
+            "insurance_covered":      ins_cov,
+            "patient_responsibility": pat_res,
+            "payment_status":         pmt_status,
+            "payment_date":           pmt_date,
+        })
+
+    execute_batch(conn, bill_sql, bill_rows)
+    print(f"    {len(bill_rows)} billing records inserted")
+    execute_batch(conn, item_sql, item_rows)
+    print(f"    {len(item_rows)} billing line items inserted")
+
+
+
 
 
 # =============================================================================
@@ -1372,41 +1494,41 @@ def main(size: str = "medium"):
         room_ids     = gen_rooms(conn, cfg, dept_ids)
         conn.commit()
 
-        patient_age_map = _load_patient_ages(conn)
+        patient_info = _load_patient_info(conn)
+        doctor_pool  = _load_staff_pool(conn, 'doctors', 'doctor_id')
+        nurse_pool   = _load_staff_pool(conn, 'nurses', 'nurse_id')
 
         # ── Domain 3: Clinical ──────────────────────────────────────────────
         print("\n[ Domain 3 ] Clinical")
         admission_ids = gen_admissions(
-            conn, cfg, patient_ids, doctor_ids, dept_ids, patient_age_map
+            conn, cfg, patient_ids, dept_ids, patient_info, doctor_pool
         )
 
         adm_dt_map, dis_dt_map = _load_admission_windows(conn)
         adm_info_map = _load_admission_clinical_info(conn)
 
-        result = conn.execute(text(
-            "SELECT admission_id, patient_id FROM admissions "
-            "WHERE admission_status IN ('Admitted','Discharged')"
-        ))
-        adm_patient_map = {row[0]: row[1] for row in result}
+        # Only admissions that actually happened (in progress or finished)
+        # get clinical records; scheduled and cancelled ones don't.
+        clinical_ids = [a for a in admission_ids
+                        if adm_info_map[a]['status'] in ('Admitted', 'Discharged')]
 
-        gen_triage(conn, admission_ids, nurse_ids, adm_dt_map, dis_dt_map)
+        gen_triage(conn, clinical_ids, nurse_pool, adm_info_map, adm_dt_map, dis_dt_map)
         gen_diagnoses(
-            conn, cfg, admission_ids, doctor_ids, adm_dt_map, dis_dt_map, adm_info_map
+            conn, cfg, clinical_ids, doctor_pool, adm_dt_map, dis_dt_map, adm_info_map
         )
-        pp_ids = gen_patient_procedures(
-            conn, cfg, admission_ids, doctor_ids, adm_dt_map, dis_dt_map
+        gen_patient_procedures(
+            conn, cfg, clinical_ids, doctor_pool, adm_dt_map, dis_dt_map
         )
-        gen_medications(conn, cfg, admission_ids, doctor_ids, adm_dt_map, dis_dt_map)
-        test_ids = gen_medical_tests(
-            conn, cfg, admission_ids, doctor_ids, nurse_ids, adm_dt_map, dis_dt_map
+        gen_medications(conn, cfg, clinical_ids, doctor_pool, adm_dt_map, dis_dt_map)
+        gen_medical_tests(
+            conn, cfg, clinical_ids, doctor_pool, nurse_pool, adm_dt_map, dis_dt_map
         )
-        gen_staff_shifts(conn, cfg, doctor_ids, nurse_ids, employee_ids, dept_ids)
+        gen_staff_shifts(conn, cfg, dept_ids)
         conn.commit()
 
         # ── Domain 4: Financial ─────────────────────────────────────────────
         print("\n[ Domain 4 ] Financial")
-        bill_map = gen_billing(conn, adm_patient_map, payer_ids, dis_dt_map)
-        gen_billing_line_items(conn, bill_map, pp_ids, test_ids)
+        gen_billing(conn)
         conn.commit()
 
     # ── Summary ─────────────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ from utils import (
     fmt_count,
     fmt_pct,
     load_data,
+    plot,
     render_kpi_row,
     wrap_label,
 )
@@ -55,7 +56,7 @@ with col1:
     fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, xaxis_title="", yaxis_title="", height=460)
     fig.update_xaxes(**AXIS_STYLE)
     fig.update_yaxes(**AXIS_STYLE)
-    st.plotly_chart(fig, use_container_width=True)
+    plot(fig)
 
 with col2:
     st.subheader("Diagnoses by department")
@@ -70,7 +71,7 @@ with col2:
     fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, xaxis_title="", yaxis_title="", height=420)
     fig.update_xaxes(**AXIS_STYLE)
     fig.update_yaxes(**AXIS_STYLE)
-    st.plotly_chart(fig, use_container_width=True)
+    plot(fig)
 
 col3, col4 = st.columns(2)
 
@@ -85,7 +86,7 @@ with col3:
     fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, xaxis_title="", yaxis_title="", height=420)
     fig.update_xaxes(**AXIS_STYLE)
     fig.update_yaxes(**AXIS_STYLE)
-    st.plotly_chart(fig, use_container_width=True)
+    plot(fig)
 
 with col4:
     st.subheader("Top medications prescribed")
@@ -97,7 +98,7 @@ with col4:
     fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, xaxis_title="", yaxis_title="", height=420)
     fig.update_xaxes(**AXIS_STYLE)
     fig.update_yaxes(**AXIS_STYLE)
-    st.plotly_chart(fig, use_container_width=True)
+    plot(fig)
 
 col5, col6 = st.columns(2)
 
@@ -116,7 +117,7 @@ with col5:
     fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, xaxis_title="", yaxis_title="")
     fig.update_xaxes(**AXIS_STYLE, tickangle=0)
     fig.update_yaxes(**AXIS_STYLE)
-    st.plotly_chart(fig, use_container_width=True)
+    plot(fig)
 
 with col6:
     st.subheader("Tests by category")
@@ -128,4 +129,4 @@ with col6:
     fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, xaxis_title="", yaxis_title="")
     fig.update_xaxes(**AXIS_STYLE)
     fig.update_yaxes(**AXIS_STYLE)
-    st.plotly_chart(fig, use_container_width=True)
+    plot(fig)

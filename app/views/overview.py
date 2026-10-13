@@ -17,6 +17,7 @@ from utils import (
     fmt_count,
     fmt_currency,
     load_data,
+    plot,
     render_kpi_row,
 )
 
@@ -26,11 +27,14 @@ departments = data["departments"]
 patients = data["patients"]
 billing = data["billing"]
 
+# scheduled admissions are future bookings — keep them out of "when did things happen"
+occurred = admissions[admissions["admission_status"] != "Scheduled"]
+
 st.title("🏥 Hospital Operations Overview")
 st.caption(
     f"{len(patients):,} patients · {len(admissions):,} admissions · "
-    f"data spans {admissions['admission_date'].min():%b %Y} – "
-    f"{admissions['admission_date'].max():%b %Y}"
+    f"data spans {occurred['admission_date'].min():%b %Y} – "
+    f"{occurred['admission_date'].max():%b %Y} (plus upcoming scheduled admissions)"
 )
 
 # ── KPI row ──────────────────────────────────────────────────────────────
@@ -56,7 +60,7 @@ col1, col2 = st.columns([3, 2])
 with col1:
     st.subheader("Admissions over time")
     monthly = (
-        admissions.set_index("admission_date")
+        occurred.set_index("admission_date")
         .resample("MS")
         .size()
         .rename("admissions")
@@ -67,7 +71,7 @@ with col1:
     fig.update_layout(**PLOTLY_LAYOUT, xaxis_title="", yaxis_title="Admissions / month")
     fig.update_xaxes(**AXIS_STYLE)
     fig.update_yaxes(**AXIS_STYLE)
-    st.plotly_chart(fig, use_container_width=True)
+    plot(fig)
 
 with col2:
     st.subheader("Admission type mix")
@@ -83,7 +87,7 @@ with col2:
     fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, xaxis_title="", yaxis_title="")
     fig.update_xaxes(**AXIS_STYLE)
     fig.update_yaxes(**AXIS_STYLE)
-    st.plotly_chart(fig, use_container_width=True)
+    plot(fig)
 
 col3, col4 = st.columns([3, 2])
 
@@ -105,7 +109,7 @@ with col3:
     )
     fig.update_xaxes(**AXIS_STYLE)
     fig.update_yaxes(**AXIS_STYLE)
-    st.plotly_chart(fig, use_container_width=True)
+    plot(fig)
 
 with col4:
     st.subheader("Patient condition mix")
@@ -122,4 +126,4 @@ with col4:
     fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, xaxis_title="", yaxis_title="")
     fig.update_xaxes(**AXIS_STYLE)
     fig.update_yaxes(**AXIS_STYLE)
-    st.plotly_chart(fig, use_container_width=True)
+    plot(fig)

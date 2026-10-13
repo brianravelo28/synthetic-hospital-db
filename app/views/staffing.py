@@ -15,6 +15,7 @@ from utils import (
     STAFF_TYPE_COLORS,
     fmt_count,
     load_data,
+    plot,
     render_kpi_row,
 )
 
@@ -62,7 +63,7 @@ fig = px.bar(
 fig.update_layout(**PLOTLY_LAYOUT, xaxis_title="Headcount", yaxis_title="", height=560, barmode="stack")
 fig.update_xaxes(**AXIS_STYLE)
 fig.update_yaxes(**AXIS_STYLE)
-st.plotly_chart(fig, use_container_width=True)
+plot(fig)
 
 col1, col2 = st.columns(2)
 
@@ -76,7 +77,7 @@ with col1:
     fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, xaxis_title="", yaxis_title="", height=420)
     fig.update_xaxes(**AXIS_STYLE)
     fig.update_yaxes(**AXIS_STYLE)
-    st.plotly_chart(fig, use_container_width=True)
+    plot(fig)
 
 with col2:
     st.subheader("Shift type distribution")
@@ -92,7 +93,7 @@ with col2:
     fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, xaxis_title="", yaxis_title="")
     fig.update_xaxes(**AXIS_STYLE)
     fig.update_yaxes(**AXIS_STYLE)
-    st.plotly_chart(fig, use_container_width=True)
+    plot(fig)
 
 col3, col4 = st.columns(2)
 
@@ -107,7 +108,7 @@ with col3:
     fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, xaxis_title="", yaxis_title="Total hours")
     fig.update_xaxes(**AXIS_STYLE)
     fig.update_yaxes(**AXIS_STYLE)
-    st.plotly_chart(fig, use_container_width=True)
+    plot(fig)
 
 with col4:
     st.subheader("Staff hires per year")
@@ -127,4 +128,4 @@ with col4:
     fig.update_layout(**PLOTLY_LAYOUT, xaxis_title="", yaxis_title="New hires")
     fig.update_xaxes(**AXIS_STYLE)
     fig.update_yaxes(**AXIS_STYLE)
-    st.plotly_chart(fig, use_container_width=True)
+    plot(fig)

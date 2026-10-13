@@ -17,6 +17,7 @@ from utils import (
     fmt_count,
     fmt_pct,
     load_data,
+    plot,
     render_kpi_row,
 )
 
@@ -91,7 +92,7 @@ with col1:
     fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, xaxis_title="", yaxis_title="")
     fig.update_xaxes(**AXIS_STYLE)
     fig.update_yaxes(**AXIS_STYLE)
-    st.plotly_chart(fig, use_container_width=True)
+    plot(fig)
 
 with col2:
     st.subheader("Length of stay distribution")
@@ -105,7 +106,7 @@ with col2:
         )
         fig.update_xaxes(**AXIS_STYLE)
         fig.update_yaxes(**AXIS_STYLE)
-        st.plotly_chart(fig, use_container_width=True)
+        plot(fig)
     else:
         st.info("No discharged admissions in the current filter.")
 
@@ -126,7 +127,7 @@ with col3:
         fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, xaxis_title="", yaxis_title="")
         fig.update_xaxes(**AXIS_STYLE)
         fig.update_yaxes(**AXIS_STYLE)
-        st.plotly_chart(fig, use_container_width=True)
+        plot(fig)
     else:
         st.info("No discharged admissions in the current filter.")
 
@@ -149,7 +150,7 @@ with col4:
         fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, xaxis_title="Acuity level", yaxis_title="")
         fig.update_xaxes(**AXIS_STYLE)
         fig.update_yaxes(**AXIS_STYLE)
-        st.plotly_chart(fig, use_container_width=True)
+        plot(fig)
     else:
         st.info("No triage records in the current filter.")
 
@@ -162,4 +163,4 @@ fig.update_traces(marker_color=CATEGORICAL[0])
 fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, xaxis_title="", yaxis_title="Admissions")
 fig.update_xaxes(**AXIS_STYLE)
 fig.update_yaxes(**AXIS_STYLE)
-st.plotly_chart(fig, use_container_width=True)
+plot(fig)
