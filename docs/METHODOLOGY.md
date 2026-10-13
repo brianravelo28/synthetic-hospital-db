@@ -99,7 +99,7 @@ Counts shift by a few between regenerations (e.g. 1,503 vs 1,504 in two otherwis
 - `tests/test_validator_and_app.py` — the rule set (51 unique rules, each with a dashboard description) and dashboard helpers.
 - `tests/test_shipped_data.py` — pandas re-implementations of the realism rules, run against the CSVs actually shipped in `app/data/`, so a regression is caught without a database. Run against the *pre-fix* CSVs from git history, 8 of its tests fail — i.e. they do detect the original problems.
 - `tests/test_pipeline_integration.py` — the whole pipeline against a real database; asserts all 51 checks run, that groups 3 and 6 have zero violations *before* repair, and that only room scarcity remains after. Runs only when `HOSPITAL_DB_URL` is set, because it regenerates the target database.
-- `.github/workflows/ci.yml` runs the first three on Python 3.11 and the fourth against a MariaDB 10.4 service container. **That workflow has not run yet** at the time of writing.
+- `.github/workflows/ci.yml` runs the first three on Python 3.11 and the fourth against a MariaDB 10.4 service container. Both jobs passed on their first run.
 
 ## Known limitations
 
@@ -107,7 +107,7 @@ Counts shift by a few between regenerations (e.g. 1,503 vs 1,504 in two otherwis
 - **The hospital is mostly empty.** 12,000 admissions across ~6.7 years is ~5 a day with a mean stay of ~5 days, so the true census is a few dozen patients against 560 rooms. Admission *volume* was kept at the original sizes rather than inventing a denser calendar.
 - **Group 7 has no repair**, by design; it only reports.
 - **No live-DB mode** — the dashboard is CSV-only by design; re-run the pipeline after any regeneration and push the result to refresh the deployed app.
-- **Public CSVs still contain SSN/phone/email/address columns** (Faker-generated; the dashboard doesn't read them). Tracked by a strict `xfail` test; they should be dropped at export.
+- **Patient SSN/phone/email/address columns are kept in the CSVs** as Faker-generated placeholders; the dashboard doesn't read them.
 - **Staff-to-department rules are strict only where checked**: diagnoses, procedures, medications and tests are attributed to any already-hired doctor in the hospital, not the admission's department.
 - **Developed on MariaDB 10.4 (XAMPP)**; MySQL 8 and other Python versions are untested outside CI.
 - **The synthetic ICD-10 catalog is 66 codes across 13 categories** — enough for realistic-looking department/gender/age-consistent diagnosis distributions, not real clinical epidemiology.

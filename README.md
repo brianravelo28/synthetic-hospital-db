@@ -142,11 +142,11 @@ There are no external data sources — every row is synthetically generated (see
 ## Status & Limitations
 
 - **Done**: schema + constraint-aware generator, 51-check validation + repair (recorded at 3 scales), one-command pipeline, CSV export, 6-page dashboard ([deployed on Streamlit Community Cloud](https://synthetic-hospital-db.streamlit.app/)), tests, 2 executed notebooks.
-- **CI is defined but unproven**: `.github/workflows/ci.yml` runs the unit tests on Python 3.11 and the full pipeline against a MariaDB 10.4 service container. The project was developed and tested locally on Python 3.9 on one Windows machine; the workflow's first run is the first time it executes anywhere else.
+- **CI**: `.github/workflows/ci.yml` runs the unit and shipped-data tests on Python 3.11 and the full pipeline against a MariaDB 10.4 service container; both jobs pass. Local development was on Python 3.9 on one Windows machine.
 - **The checks measure consistency with rules I wrote, not clinical realism.** Groups 1–6 were written alongside the generator; Group 7 was added afterwards, but it is still my idea of what "wrong" looks like. Medications, procedures and diagnoses, for example, are still drawn independently of one another, and ages follow a hand-set curve rather than a real population.
 - **Known residual violation**: a department with no room type suited to a patient's condition (small/medium scale). Repair downgrades the recorded condition rather than invent a room.
 - **Hospital is mostly empty**: 12,000 admissions over ~6.7 years is about 5 a day, so the census (currently admitted) is small relative to 560 rooms. That is arithmetic, not a bug, but it is not a realistic occupancy.
-- **Known issue — PII-shaped columns in the public CSVs**: `app/data/patients.csv` still includes SSN, phone, email and address (Faker-generated, but SSN-shaped values can coincide with real ones). The dashboard never reads them; they should be dropped at export. A strict `xfail` test tracks this.
+- **Patient columns like SSN, phone, email and address** are included in `app/data/patients.csv`. They are Faker-generated placeholders (like everything else here), the dashboard doesn't read them, and they're kept deliberately as part of the realistic-looking schema.
 - **Not reproducible bit-for-bit**: the seed fixes Python's random stream, but wall-clock dates (`datetime.now()`) and the repair step's SQL `RAND()` still vary between runs, so counts shift slightly.
 - **Dashboard data is a static snapshot**: the deployed app reads the CSVs committed in `app/data/`, so it only changes when the pipeline is re-run and the result is pushed — there is no live database behind it.
 

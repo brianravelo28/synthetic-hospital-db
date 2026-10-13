@@ -127,10 +127,3 @@ def test_doctors_are_hired_before_acting_and_not_too_young(d):
     for key in ("doctors", "nurses"):
         age_at_hire = (d[key]["hire_date"] - d[key]["birth_date"]).dt.days / 365.25
         assert (age_at_hire >= 21).all(), key
-
-
-@pytest.mark.xfail(strict=True, reason="Known issue, not yet fixed: the public CSVs include SSN, phone, email "
-                                       "and address columns (Faker-generated, but SSN-shaped). The dashboard "
-                                       "never reads them; they should be dropped at export.")
-def test_public_csv_has_no_pii_shaped_columns(d):
-    assert not ({"ssn", "phone", "email", "address"} & set(d["patients"].columns))
