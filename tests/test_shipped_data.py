@@ -26,7 +26,7 @@ def d():
     meta = json.loads((DATA / "validation_report_meta.json").read_text(encoding="utf-8"))
     return {
         "meta": meta,
-        "generated_at": pd.Timestamp(meta["generated_at_utc"]),
+        "generated_at": pd.Timestamp(meta.get("as_of") or meta["generated_at_utc"]),
         "patients": load("patients", ["birth_date", "registered_date"]),
         "admissions": load("admissions", ["admission_date", "discharge_date"]),
         "billing": load("billing", ["bill_date"]),

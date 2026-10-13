@@ -14,6 +14,9 @@ dashboard's Data Quality page reads, plus a small metadata file next to it.
 Needs a running MySQL/MariaDB with data/hospital_db.sql loaded; the connection
 string comes from HOSPITAL_DB_URL (default: root, no password, localhost).
 
+Set HOSPITAL_AS_OF (e.g. "2026-10-13 12:00:00") to pin the run's reference date;
+with the fixed seeds, two runs with the same value produce identical tables.
+
 WARNING: this truncates and regenerates every table in the target database.
 """
 
@@ -29,6 +32,7 @@ sys.path.insert(0, str(ROOT / "data"))
 sys.path.insert(0, str(ROOT / "src"))
 
 import hospital_generator as gen      # noqa: E402
+from shared_rules import AS_OF        # noqa: E402
 import validate_repair as vr          # noqa: E402
 from export_to_csv import export      # noqa: E402
 from sqlalchemy import create_engine  # noqa: E402
@@ -90,6 +94,7 @@ def run(size: str, export_dir: Path, report_path: Path, do_export: bool,
     meta = {
         "size": size,
         "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"),
+        "as_of": AS_OF.strftime("%Y-%m-%d %H:%M:%S"),
         "checks": len(out_rows),
         "violations_before_repair": sum(r["before_repair"] for r in out_rows),
         "violations_after_repair": sum(r["after_repair"] for r in out_rows),

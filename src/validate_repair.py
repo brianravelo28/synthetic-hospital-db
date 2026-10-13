@@ -33,12 +33,19 @@ Usage (Jupyter):
 
 import os
 import random
+import zlib
 import numpy as np
 from datetime import date, datetime, timedelta
 from sqlalchemy import create_engine, text
 from collections import defaultdict
 
 from icd10_diagnoses import sample_diagnosis, get_diagnoses_for_department
+from shared_rules import (
+    AS_OF, AS_OF_SQL, CONDITION_ROOM_MAP, FEMALE_IMPOSSIBLE_CODES, MALE_IMPOSSIBLE_CODES,
+    NEWBORN_ONLY_CODES, OB_NEWBORN_DEPTS, PAYER_COVERAGE,
+)
+
+REPAIR_SEED = 42      # repair is deterministic: the same data always gets the same fixes
 
 DB_URL = os.environ.get("HOSPITAL_DB_URL", "mysql+pymysql://root:@localhost/hospital_db")
 
@@ -53,13 +60,8 @@ CROSS_DEPT_SPECIALTIES = {
     'Radiologist', 'Pathologist'
 }
 
-# Allowed room types per patient condition
-CONDITION_ROOM_MAP = {
-    'Intensive': ['ICU', 'NICU'],
-    'Maximum':   ['ICU', 'NICU', 'Private', 'Isolation'],
-    'Moderate':  ['Standard', 'Private'],
-    'Minimal':   ['Standard', 'Recovery', 'Private'],
-}
+# (CONDITION_ROOM_MAP, the impossible-diagnosis sets, OB_NEWBORN_DEPTS and
+# PAYER_COVERAGE live in shared_rules.py, shared with the generator.)
 
 # Minimum condition required by room type
 # Used as fallback when no appropriate room exists in the department
@@ -72,24 +74,6 @@ ROOM_MIN_CONDITION = {
     'Recovery': 'Minimal',
     'ER':       'Minimal',
     'OR':       'Minimal',
-}
-
-# ICD-10 codes that are biologically impossible for certain genders/ages
-MALE_IMPOSSIBLE_CODES  = {'O80', 'O34.21', 'O09.90', 'O20.0', 'C50.919'}
-FEMALE_IMPOSSIBLE_CODES = {'C61'}
-NEWBORN_ONLY_CODES      = {'Z38.00', 'P07.30'}
-
-# OB/GYN and newborn departments
-OB_NEWBORN_DEPTS = {'DEP-008', 'DEP-009'}
-
-# Payer coverage rates — must match hospital_generator.py
-PAYER_COVERAGE = {
-    'Medicare':             0.80,
-    'Medicaid':             0.72,
-    'Private Insurance':    0.85,
-    'Self-Pay':             0.00,
-    'Workers Compensation': 0.90,
-    'CHIP':                 0.75,
 }
 
 
@@ -108,7 +92,7 @@ def get_dept_name_map(conn) -> dict:
 def get_dept_doctor_map(conn) -> dict:
     """Return {department_id: [doctor_ids]} for reassignment."""
     result = conn.execute(text(
-        "SELECT doctor_id, department_id FROM doctors"
+        "SELECT doctor_id, department_id FROM doctors ORDER BY doctor_id"
     ))
     m = defaultdict(list)
     for row in result:
@@ -122,9 +106,9 @@ def get_dept_room_map(conn, room_types: list = None) -> dict:
     """
     if room_types:
         placeholders = ', '.join(f"'{rt}'" for rt in room_types)
-        sql = f"SELECT room_id, department_id FROM rooms WHERE room_type IN ({placeholders})"
+        sql = f"SELECT room_id, department_id FROM rooms WHERE room_type IN ({placeholders}) ORDER BY room_id"
     else:
-        sql = "SELECT room_id, department_id FROM rooms"
+        sql = "SELECT room_id, department_id FROM rooms ORDER BY room_id"
     result = conn.execute(text(sql))
     m = defaultdict(list)
     for row in result:
@@ -335,53 +319,46 @@ def repair_temporal(conn):
     # ── Payment date before bill date ─────────────────────────────────────
     conn.execute(text("""
         UPDATE billing
-        SET payment_date = DATE_ADD(bill_date, INTERVAL FLOOR(5 + RAND() * 85) DAY)
+        SET payment_date = DATE_ADD(bill_date, INTERVAL 5 + MOD(CRC32(bill_id), 85) DAY)
         WHERE payment_status = 'Paid'
           AND (payment_date IS NULL OR payment_date < bill_date)
     """))
 
-    # ── Registered date: probabilistic by age (Python loop) ───────────────
-    result = conn.execute(text("""
+    # ── Registered date: fix only violations (idempotent, deterministic) ──
+    # Valid = on/after birth and on/before the first admission and AS_OF.
+    # Rows already valid are left alone, so re-running repair changes nothing;
+    # for violators the choice comes from a hash of the patient id, not RNG.
+    as_of_date = AS_OF.date()
+    result = conn.execute(text(f"""
         SELECT p.patient_id, p.age,
-               COALESCE(MIN(DATE(a.admission_date)), CURDATE()) AS first_adm,
-               p.birth_date
+               COALESCE(MIN(DATE(a.admission_date)), DATE({AS_OF_SQL})) AS first_adm,
+               p.birth_date, p.registered_date
         FROM patients p
         LEFT JOIN admissions a ON p.patient_id = a.patient_id
-        GROUP BY p.patient_id, p.age, p.birth_date
+        GROUP BY p.patient_id, p.age, p.birth_date, p.registered_date
     """))
-    rows = result.fetchall()
     updates = []
-    for row in rows:
-        patient_id, age, first_adm, birth_date = row
-        if isinstance(first_adm, str):
-            first_adm = date.fromisoformat(first_adm)
+    for patient_id, age, first_adm, birth_date, registered in result.fetchall():
+        first_adm  = date.fromisoformat(first_adm)  if isinstance(first_adm, str)  else first_adm
+        birth_date = date.fromisoformat(birth_date) if isinstance(birth_date, str) else birth_date
+        registered = date.fromisoformat(registered) if isinstance(registered, str) else registered
+        latest = min(first_adm, as_of_date)         # (a scheduled first admission may be in the future)
+        if birth_date <= registered <= latest:
+            continue
 
-        if age <= 21:
-            if random.random() < 0.55:
-                reg_date = first_adm
-            else:
-                delta    = random.randint(0, 90)
-                reg_date = first_adm - timedelta(days=delta)
-        else:
-            if random.random() < 0.25:
-                reg_date = first_adm
-            else:
-                delta    = random.randint(0, 730)
-                reg_date = first_adm - timedelta(days=delta)
-
-        if isinstance(birth_date, str):
-            birth_date = date.fromisoformat(birth_date)
-        # registration can't precede birth, and can't be in the future
-        # (the first admission may be a scheduled one that hasn't happened yet)
-        reg_date = min(max(reg_date, birth_date), date.today())
-        updates.append({"patient_id": patient_id, "registered_date": reg_date})
+        h1 = zlib.crc32(patient_id.encode()) % 1000 / 1000
+        h2 = zlib.crc32((patient_id + "|delta").encode()) % 1000 / 1000
+        same_day_p, span = (0.55, 90) if age <= 21 else (0.25, 730)
+        reg_date = latest if h1 < same_day_p else latest - timedelta(days=int(h2 * span))
+        updates.append({"patient_id": patient_id,
+                        "registered_date": min(max(reg_date, birth_date), latest)})
 
     batch_update(conn,
         "UPDATE patients SET registered_date = :registered_date "
         "WHERE patient_id = :patient_id",
         updates
     )
-    print(f"    Registered dates adjusted for {len(updates)} patients")
+    print(f"    Registered dates fixed for {len(updates)} patients")
     print("    Group 1 complete.")
 
 
@@ -430,23 +407,24 @@ def validate_age(conn) -> dict:
 def repair_age(conn):
     print("  [Group 2] Repairing age-based violations...")
 
-    # ── Newborn birth_date, age, registered_date (Python for randomness) ──
+    # ── Newborn birth_date, age, registered_date (only where inconsistent) ──
     result = conn.execute(text("""
-        SELECT DISTINCT p.patient_id, DATE(a.admission_date) AS adm_date
+        SELECT DISTINCT p.patient_id, DATE(a.admission_date) AS adm_date,
+               p.age, p.birth_date, p.registered_date
         FROM patients p
         JOIN admissions a ON p.patient_id = a.patient_id
         WHERE a.admission_type = 'Newborn'
     """))
-    rows = result.fetchall()
     updates = []
-    for row in rows:
-        pid, adm_date = row
-        if isinstance(adm_date, str):
-            adm_date = date.fromisoformat(adm_date)
-        birth_date = adm_date - timedelta(days=random.randint(0, 3))
+    for pid, adm_date, age, birth, registered in result.fetchall():
+        adm_date   = date.fromisoformat(adm_date)   if isinstance(adm_date, str)   else adm_date
+        birth      = date.fromisoformat(birth)      if isinstance(birth, str)      else birth
+        registered = date.fromisoformat(registered) if isinstance(registered, str) else registered
+        if age == 0 and registered == adm_date and adm_date - timedelta(days=3) <= birth <= adm_date:
+            continue                                  # already consistent
         updates.append({
             "patient_id":      pid,
-            "birth_date":      birth_date,
+            "birth_date":      adm_date - timedelta(days=zlib.crc32(pid.encode()) % 4),
             "age":             0,
             "registered_date": adm_date,
         })
@@ -562,7 +540,7 @@ def repair_admission_type(conn):
     conn.execute(text("""
         UPDATE triage t
         JOIN admissions a ON t.admission_id = a.admission_id
-        SET t.acuity_level = FLOOR(1 + RAND() * 3)
+        SET t.acuity_level = 1 + MOD(CRC32(t.triage_id), 3)
         WHERE a.admission_type = 'Emergency' AND t.acuity_level > 3
     """))
 
@@ -929,7 +907,7 @@ def repair_financial(conn):
     # ── Paid: ensure payment_date is set ──────────────────────────────────
     conn.execute(text("""
         UPDATE billing
-        SET payment_date = DATE_ADD(bill_date, INTERVAL FLOOR(5 + RAND() * 85) DAY)
+        SET payment_date = DATE_ADD(bill_date, INTERVAL 5 + MOD(CRC32(bill_id), 85) DAY)
         WHERE payment_status = 'Paid' AND payment_date IS NULL
     """))
 
@@ -962,14 +940,14 @@ def validate_realism(conn) -> dict:
             ) x JOIN departments d ON d.department_id = x.department_id
             WHERE x.n > d.bed_capacity
         """),
-        'stale_admitted_over_60d': _count(conn, """
+        'stale_admitted_over_60d': _count(conn, f"""
             SELECT COUNT(*) FROM admissions
             WHERE admission_status = 'Admitted'
-              AND admission_date < DATE_SUB(NOW(), INTERVAL 60 DAY)
+              AND admission_date < DATE_SUB({AS_OF_SQL}, INTERVAL 60 DAY)
         """),
-        'scheduled_in_past': _count(conn, """
+        'scheduled_in_past': _count(conn, f"""
             SELECT COUNT(*) FROM admissions
-            WHERE admission_status = 'Scheduled' AND admission_date < NOW()
+            WHERE admission_status = 'Scheduled' AND admission_date < {AS_OF_SQL}
         """),
         'admission_before_birth': _count(conn, """
             SELECT COUNT(*) FROM admissions a
@@ -979,8 +957,8 @@ def validate_realism(conn) -> dict:
         'registered_before_birth': _count(conn, """
             SELECT COUNT(*) FROM patients WHERE registered_date < birth_date
         """),
-        'registered_in_future': _count(conn, """
-            SELECT COUNT(*) FROM patients WHERE registered_date > CURDATE()
+        'registered_in_future': _count(conn, f"""
+            SELECT COUNT(*) FROM patients WHERE registered_date > DATE({AS_OF_SQL})
         """),
         'bill_before_admission': _count(conn, """
             SELECT COUNT(*) FROM billing b
@@ -1119,6 +1097,8 @@ def repair_all(conn):
     Group 1 must run before all others.
     Group 6 must run last.
     """
+    random.seed(REPAIR_SEED)
+    np.random.seed(REPAIR_SEED)
     print(f"\n{'='*60}")
     print("  Running repairs...")
     print(f"{'='*60}\n")

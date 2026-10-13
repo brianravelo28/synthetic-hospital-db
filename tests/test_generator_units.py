@@ -101,13 +101,34 @@ def test_vitals_ranges_are_plausible_for_age(age):
 
 # ── generator and validator carry copies of the same constants ───────────
 
-def test_shared_constants_match_between_generator_and_validator():
-    assert gen.CONDITION_ROOM_MAP == vr.CONDITION_ROOM_MAP
-    assert gen.MALE_IMPOSSIBLE_CODES == vr.MALE_IMPOSSIBLE_CODES
-    assert gen.FEMALE_IMPOSSIBLE_CODES == vr.FEMALE_IMPOSSIBLE_CODES
-    assert gen.NEWBORN_ONLY_CODES == vr.NEWBORN_ONLY_CODES
-    assert gen.PAYER_COVERAGE == vr.PAYER_COVERAGE
-    assert set(gen.NEWBORN_DEPT_POOL) == vr.OB_NEWBORN_DEPTS
+def test_generator_and_validator_share_one_copy_of_each_constant():
+    """They used to carry separate copies held together by "must match" comments."""
+    import shared_rules
+    assert gen.CONDITION_ROOM_MAP is vr.CONDITION_ROOM_MAP is shared_rules.CONDITION_ROOM_MAP
+    assert gen.MALE_IMPOSSIBLE_CODES is vr.MALE_IMPOSSIBLE_CODES is shared_rules.MALE_IMPOSSIBLE_CODES
+    assert gen.FEMALE_IMPOSSIBLE_CODES is vr.FEMALE_IMPOSSIBLE_CODES is shared_rules.FEMALE_IMPOSSIBLE_CODES
+    assert gen.NEWBORN_ONLY_CODES is vr.NEWBORN_ONLY_CODES is shared_rules.NEWBORN_ONLY_CODES
+    assert gen.PAYER_COVERAGE is vr.PAYER_COVERAGE is shared_rules.PAYER_COVERAGE
+    assert gen.AS_OF is vr.AS_OF is shared_rules.AS_OF
+    assert set(gen.NEWBORN_DEPT_POOL) == shared_rules.OB_NEWBORN_DEPTS
+
+
+def test_reference_date_can_be_pinned_by_env_var():
+    import subprocess, sys
+    code = "import sys; sys.path.insert(0, 'data'); import shared_rules as s; print(s.AS_OF, s.AS_OF_SQL)"
+    root = __import__("pathlib").Path(__file__).resolve().parent.parent
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=root,
+                         env={**__import__("os").environ, "HOSPITAL_AS_OF": "2026-10-13 12:00:00"}).stdout.strip()
+    assert out == "2026-10-13 12:00:00 '2026-10-13 12:00:00'"
+
+
+def test_no_raw_clock_or_sql_randomness_left_in_the_pipeline():
+    """Everything reads the one reference date; repair uses hashes, not RAND()."""
+    import re
+    root = __import__("pathlib").Path(__file__).resolve().parent.parent
+    for path in ("data/hospital_generator.py", "src/validate_repair.py"):
+        text = (root / path).read_text(encoding="utf-8")
+        assert not re.search(r"datetime\.now\(\)|date\.today\(\)|NOW\(\)|CURDATE\(\)|RAND\(\)", text), path
 
 
 def test_every_room_type_has_a_billing_rate():

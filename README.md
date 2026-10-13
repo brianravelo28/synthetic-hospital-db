@@ -52,7 +52,7 @@ mysql -u root < data/hospital_db.sql          # create the schema
 python src/run_pipeline.py --size large        # or small / medium
 ```
 
-That one command generates the data, validates it, repairs it, validates again, and exports everything the dashboard reads (`app/data/*.csv`, including `validation_report.csv`). ⚠️ It **truncates and regenerates every table** in the target database. The connection string comes from `HOSPITAL_DB_URL` (default: `mysql+pymysql://root:@localhost/hospital_db`).
+That one command generates the data, validates it, repairs it, validates again, and exports everything the dashboard reads (`app/data/*.csv`, including `validation_report.csv`). ⚠️ It **truncates and regenerates every table** in the target database. The connection string comes from `HOSPITAL_DB_URL` (default: `mysql+pymysql://root:@localhost/hospital_db`). Set `HOSPITAL_AS_OF` to pin the run's reference date for a reproducible run.
 
 The individual steps are still importable (`data/hospital_generator.py`, `src/validate_repair.py`, `src/export_to_csv.py`) and the notebooks use them directly.
 
@@ -125,6 +125,7 @@ synthetic-hospital-db/
 ├── data/                    # schema + constraint-aware generator (the "acquisition" step for synthetic data)
 │   ├── hospital_db.sql
 │   ├── hospital_generator.py
+│   ├── shared_rules.py        # constants + reference date shared by generator and validator
 │   └── icd10_diagnoses.py
 ├── src/                     # pipeline: validation/repair, CSV export, one-command runner
 │   ├── validate_repair.py
@@ -150,7 +151,7 @@ There are no external data sources — every row is synthetically generated (see
 - **Known residual violation**: a department with no room type suited to a patient's condition (small/medium scale). Repair downgrades the recorded condition rather than invent a room.
 - **Hospital is mostly empty**: 12,000 admissions over ~6.7 years is about 5 a day, so the census (currently admitted) is small relative to 560 rooms. That is arithmetic, not a bug, but it is not a realistic occupancy.
 - **Patient columns like SSN, phone, email and address** are included in `app/data/patients.csv`. They are Faker-generated placeholders (like everything else here), the dashboard doesn't read them, and they're kept deliberately as part of the realistic-looking schema.
-- **Not reproducible bit-for-bit**: the seed fixes Python's random stream, but wall-clock dates (`datetime.now()`) and the repair step's SQL `RAND()` still vary between runs, so counts shift slightly.
+- **Reproducible when pinned**: seeds are fixed and the whole pipeline reads one reference date. Set `HOSPITAL_AS_OF` (e.g. `2026-10-13 12:00:00`) and two runs produce identical tables — tested, including that a *different* date gives different tables. Unpinned, "now" is the wall clock, so counts shift slightly between runs. Repair is deterministic and idempotent: re-running it changes nothing.
 - **Dashboard data is a static snapshot**: the deployed app reads the CSVs committed in `app/data/`, so it only changes when the pipeline is re-run and the result is pushed — there is no live database behind it.
 
 ## License

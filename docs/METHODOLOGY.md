@@ -99,7 +99,7 @@ Each run: generate, `validate_all()` before any repair, `repair_all()`, `validat
 
 The one residual that matters is **`condition_room_mismatch`**: it occurs when a department genuinely has no room of the type a patient's condition calls for (worst at small scale, where the room pool is thinnest). Repair downgrades the recorded condition rather than fabricate a room.
 
-Counts shift by a few between regenerations (e.g. 1,503 vs 1,504 in two otherwise identical small runs): the seed fixes Python's random stream, but wall-clock dates and the repair step's SQL `RAND()` still vary.
+The recorded runs above drifted by a few violations between regenerations (e.g. 1,503 vs 1,504 in two otherwise identical small runs) because "now" was the wall clock and the repair step used SQL `RAND()`. Both are gone: the pipeline reads one reference date (`AS_OF`, from `data/shared_rules.py`, pinned with `HOSPITAL_AS_OF`), repair picks its values from a hash of each row's id instead of `RAND()`, and repair only touches rows that actually violate a rule. With the date pinned, two runs give identical tables and a second repair changes nothing (both tested). The numbers in the table predate this change.
 
 ## Pipeline and dashboard
 
@@ -113,7 +113,7 @@ Counts shift by a few between regenerations (e.g. 1,503 vs 1,504 in two otherwis
 - `tests/test_generator_units.py` — pure logic: age sampling, hire dates, `StaffPool` (nobody acts before being hired), diagnosis sampling never returning impossible codes, age-banded vitals, and that the constants copied between the generator and validator stay identical.
 - `tests/test_validator_and_app.py` — the rule set (51 unique rules, each with a dashboard description) and dashboard helpers.
 - `tests/test_shipped_data.py` — pandas re-implementations of the realism rules, run against the CSVs actually shipped in `app/data/`, so a regression is caught without a database. Run against the *pre-fix* CSVs from git history, 8 of its tests fail — i.e. they do detect the original problems.
-- `tests/test_pipeline_integration.py` — the whole pipeline against a real database; asserts all 51 checks run, that groups 3 and 6 have zero violations *before* repair, and that only room scarcity remains after. Runs only when `HOSPITAL_DB_URL` is set, because it regenerates the target database.
+- `tests/test_pipeline_integration.py` — the whole pipeline against a real database; asserts all 51 checks run, that groups 3 and 6 have zero violations *before* repair, that only room scarcity remains after, that two runs with the same pinned reference date produce identical tables, and that running repair a second time changes nothing. Runs only when `HOSPITAL_DB_URL` is set, because it regenerates the target database.
 - `.github/workflows/ci.yml` runs the first three on Python 3.11 and the fourth against a MariaDB 10.4 service container. Both jobs passed on their first run.
 
 ## Known limitations
