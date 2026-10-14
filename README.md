@@ -65,7 +65,7 @@ The individual steps are still importable (`data/hospital_generator.py`, `src/va
 streamlit run app/app.py            # -> http://localhost:8501
 ```
 
-This step needs no database — it runs straight from the CSVs already committed in `app/data/`. Opening the repo in **GitHub Codespaces** does this automatically (see `.devcontainer/`).
+This step needs no database — it runs straight from the CSVs already committed in `app/data/`. Opening the repo in **GitHub Codespaces** does this automatically (see `.devcontainer/`): it installs the pinned dependencies and starts the dashboard on port 8501, opening it in a browser tab (the embedded preview is blocked by GitHub for private ports). Verified in a Codespace on 2026-10-14. The container has no database, so the pipeline, notebook 02 and the integration tests need a local MySQL/MariaDB instead.
 
 The dashboard reads **only** the exported CSVs, never a live connection — this is what makes it deployable to [Streamlit Community Cloud](https://streamlit.io/cloud) as-is, since a deployed app can't reach a local database. `app/requirements.txt` is a separate, minimal requirements file (just `streamlit`/`pandas`/`plotly`) scoped to the dashboard alone — Streamlit Cloud installs from whichever `requirements.txt` sits next to the app's entry point, and the full pipeline's dependencies (SQLAlchemy, Faker, Jupyter...) have no reason to ship with the deployed app.
 
