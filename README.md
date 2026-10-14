@@ -36,7 +36,7 @@ Most synthetic-data generators produce rows that are individually plausible but 
 
 - 📊 **6-page Streamlit dashboard**, fully self-contained (bundled CSVs, no live DB dependency) — Overview, Admissions & Census, Clinical, Staffing, Financials, Data Quality
 - ✅ **Automated tests**: unit tests, CSV-level data tests (run against the shipped data, no database needed), and an end-to-end pipeline test, wired to a GitHub Actions workflow
-- 📓 **Two executed notebooks** with real, live-generated output
+- 📓 **Three executed notebooks** with real, live-generated output (EDA, a live validation run, and SQL analysis)
 
 ## Quick Start
 
@@ -91,6 +91,7 @@ jupyter notebook notebooks/
 ```
 - `01_eda_hospital_operations.ipynb` — exploratory analysis of the repaired dataset (admissions trends, department volume, diagnoses, length of stay, financials); reads only `app/data/`, no DB needed
 - `02_data_quality_validation.ipynb` — a **live** re-run of the generate → validate → repair cycle at small scale, capturing real before/after numbers (⚠️ truncates and regenerates the database named by `HOSPITAL_DB_URL` — see the notebook's own warning)
+- `03_sql_analysis.ipynb` — business questions in **SQL** (joins, window functions, CTEs, the polymorphic `staff_shifts` join, a data-quality rule as a query) against the shipped CSVs loaded into in-memory SQLite, so it needs no database server
 
 ## Dashboard
 
@@ -137,7 +138,7 @@ synthetic-hospital-db/
 │   ├── export_to_csv.py
 │   └── run_pipeline.py
 ├── tests/                   # unit, shipped-data and end-to-end tests
-├── notebooks/               # EDA and data-quality validation (executed, real outputs)
+├── notebooks/               # EDA, data-quality validation, SQL analysis (executed, real outputs)
 ├── app/                     # Streamlit dashboard (self-contained, bundled CSVs in app/data/)
 └── docs/                    # schema reference, methodology, citations, validation_runs/ (recorded results)
 ```
@@ -150,7 +151,7 @@ There are no external data sources — every row is synthetically generated (see
 
 ## Status & Limitations
 
-- **Done**: schema + constraint-aware generator, 57-check validation + repair (recorded at 3 scales), one-command pipeline, CSV export, 6-page dashboard ([deployed on Streamlit Community Cloud](https://synthetic-hospital-db.streamlit.app/)), tests, 2 executed notebooks.
+- **Done**: schema + constraint-aware generator, 57-check validation + repair (recorded at 3 scales), one-command pipeline, CSV export, 6-page dashboard ([deployed on Streamlit Community Cloud](https://synthetic-hospital-db.streamlit.app/)), tests, 3 executed notebooks.
 - **CI and versions**: `.github/workflows/ci.yml` runs the unit and shipped-data tests on Python 3.11 and the full pipeline against a MariaDB 10.4 service container; both jobs pass. Dependencies are pinned to exact versions (`requirements.txt`, `app/requirements.txt`), tested together on Python 3.11 — pandas 3 requires 3.11 or newer. Development before that was on Python 3.9 on one Windows machine, which the pins no longer support.
 - **The checks measure consistency with rules I wrote, not clinical realism.** Groups 1–6 were written alongside the generator; Groups 7 and 8 were added afterwards, but they are still my idea of what "wrong" looks like. Group 8 catches six hard contradictions between a patient, their diagnoses and their treatments; the diagnosis-to-treatment mapping behind it is a coarse, hand-built table, so an odd-but-not-contradictory pairing can still occur. Ages follow a hand-set curve rather than a real population.
 - **Known residual violation**: a department with no room type suited to a patient's condition (small/medium scale). Repair downgrades the recorded condition rather than invent a room.
