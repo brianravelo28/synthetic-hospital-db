@@ -2,7 +2,7 @@
 
 ![Hospital Operations dashboard](docs/screenshot.png)
 
-![Data Quality page — the 51 checks, before vs after repair](docs/screenshot_data_quality.png)
+![Data Quality page — the 57 checks, before vs after repair](docs/screenshot_data_quality.png)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
