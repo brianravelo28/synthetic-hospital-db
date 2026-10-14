@@ -153,4 +153,4 @@ The recorded runs above drifted by a few violations between regenerations (e.g. 
 - **Patient SSN/phone/email/address columns are kept in the CSVs** as Faker-generated placeholders; the dashboard doesn't read them.
 - **Staff-to-department rules are strict only where checked**: diagnoses, procedures, medications and tests are attributed to any already-hired doctor in the hospital, not the admission's department.
 - **Developed on MariaDB 10.4 (XAMPP)**; MySQL 8 and other Python versions are untested outside CI.
-- **The synthetic ICD-10 catalog is 66 codes across 13 categories** — enough for realistic-looking department/gender/age-consistent diagnosis distributions, not real clinical epidemiology.
+- **The synthetic ICD-10 catalog is 66 codes across 13 categories** — enough for realistic-looking department/gender/age-consistent diagnosis distributions, not real clinical epidemiology. The per-code weights (2.5 to 9.5) are hand-assigned judgement of relative commonness, not taken from CMS/HCUP or any study.

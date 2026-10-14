@@ -8,11 +8,15 @@ Each entry includes:
     - icd10_code     : Standard ICD-10-CM code
     - diagnosis_name : Clinical name
     - departments    : List of departments where this diagnosis typically appears
-    - weight         : Relative prevalence for weighted random sampling
-                       Weights are proportional to real US inpatient admission
-                       frequencies (CMS/HCUP data). They do not need to sum to 1 —
-                       np.random.choice normalizes them automatically when you pass
-                       p = weights / weights.sum()
+    - weight         : Relative likelihood for weighted random sampling.
+                       Weights are hand-assigned judgement (2.5 to 9.5), not
+                       derived from CMS/HCUP or any other dataset: conditions
+                       that are common in a general hospital (heart failure,
+                       pneumonia, sepsis, heart attack) get more weight than
+                       less common ones (leukemia, preterm newborn). They carry
+                       no claim of statistical accuracy. They do not need to
+                       sum to 1 — np.random.choice normalizes them when you
+                       pass p = weights / weights.sum()
 
 Usage:
     import numpy as np
@@ -34,7 +38,7 @@ import pandas as pd
 
 # ─── DIAGNOSES ────────────────────────────────────────────────────────────────
 # Organized by clinical category. Within each category, entries are ordered
-# roughly by descending prevalence.
+# roughly by how common the author judged them to be (hand-set, not data).
 
 DIAGNOSES = [
 
