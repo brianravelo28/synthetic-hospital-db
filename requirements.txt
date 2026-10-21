@@ -3,7 +3,7 @@
 # `pytest` and the dashboard.
 
 # Data generation & pipeline (data/, src/)
-sqlalchemy==2.1.4
+sqlalchemy==2.1.5
 pymysql==1.2.3
 faker==40.43.0
 numpy==2.4.6
