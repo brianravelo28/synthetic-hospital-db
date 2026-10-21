@@ -11,7 +11,7 @@ group1_temporal,Group 1 — Temporal,bill_before_discharge,0,0
 group1_temporal,Group 1 — Temporal,payment_before_bill,0,0
 group2_age,Group 2 — Age-based,newborn_wrong_age,0,0
 group2_age,Group 2 — Age-based,newborn_wrong_dept,0,0
-group2_age,Group 2 — Age-based,newborn_wrong_registered_date,10,0
+group2_age,Group 2 — Age-based,newborn_wrong_registered_date,21,0
 group2_age,Group 2 — Age-based,pediatric_in_geriatric_dept,0,0
 group2_age,Group 2 — Age-based,adult_in_pediatric_dept,0,0
 group2_age,Group 2 — Age-based,geriatric_newborn_diagnosis,0,0
@@ -25,7 +25,7 @@ group3_admission_type,Group 3 — Admission Type,scheduled_has_billing,0,0
 group3_admission_type,Group 3 — Admission Type,scheduled_has_room,0,0
 group4_department,Group 4 — Department Consistency,doctor_dept_mismatch,0,0
 group4_department,Group 4 — Department Consistency,room_dept_mismatch,0,0
-group4_department,Group 4 — Department Consistency,condition_room_mismatch,73,2
+group4_department,Group 4 — Department Consistency,condition_room_mismatch,0,0
 group5_diagnoses,Group 5 — Diagnosis Alignment,male_impossible_codes,0,0
 group5_diagnoses,Group 5 — Diagnosis Alignment,female_impossible_codes,0,0
 group5_diagnoses,Group 5 — Diagnosis Alignment,newborn_codes_on_adults,0,0
@@ -38,6 +38,7 @@ group7_realism,Group 7 — Operational Realism (detect-only),census_exceeds_bed_
 group7_realism,Group 7 — Operational Realism (detect-only),stale_admitted_over_60d,0,0
 group7_realism,Group 7 — Operational Realism (detect-only),scheduled_in_past,0,0
 group7_realism,Group 7 — Operational Realism (detect-only),admission_before_birth,0,0
+group7_realism,Group 7 — Operational Realism (detect-only),room_double_booked,0,0
 group7_realism,Group 7 — Operational Realism (detect-only),registered_before_birth,0,0
 group7_realism,Group 7 — Operational Realism (detect-only),registered_in_future,0,0
 group7_realism,Group 7 — Operational Realism (detect-only),bill_before_admission,0,0
