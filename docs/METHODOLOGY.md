@@ -1,95 +1,96 @@
 # Methodology
 
-## Starting point: a stale diagnosis
+How the data is built, how it is checked, what each round of fixes found, and where it stops being realistic.
 
-The project came with a hand-written problem writeup blaming the generate → repair loop on four things: date windows outside the admission period, age/department mismatches, invalid diagnosis codes, and doctor/department misalignment. Before writing any patch, each claim was checked against the actual generator code (`hospital_generator.py`) rather than taken on faith — and two of the four turned out to already be fixed:
+## Summary
 
-- **Date windows** (diagnosis/procedure/medication/test/triage dates within the admission window) — already correctly constrained via `date_within_admission()` / `datetime_within_admission()`.
-- **Doctor and room matched to admission department** — already correctly built from department lookups in `gen_admissions()`.
+- A generator builds the 17-table database, a validator runs **59 consistency checks**, and a repair step fixes what is left. The generator prevents most violations; at large size repair fixes only the newborn registration date.
+- Four rounds of fixes, each measured before and after: generator fixes, independent realism checks, treatments that fit the diagnosis, and realistic occupancy.
+- The first generator's data passed the original six check groups with 19 violations; the 16 independent checks written afterwards found 59,105.
+- Everything is synthetic, and the checks test consistency with rules I wrote, not clinical realism. See [Known limitations](#known-limitations).
 
-Patching things that weren't broken would have wasted the "preventive over reactive" budget on the wrong targets. The actual violation drivers were found by reading the rest of the generator against `validate_repair.py`'s rule set line by line.
+Terms: a *foreign key* links a column to another table's row; `CHECK` is a constraint that rejects a row breaking a rule; ICD-10 is the diagnosis coding system; CPT is the procedure coding system; ESI is the Emergency Severity Index, a 1 (most urgent) to 5 triage scale.
 
-## Round one: what was actually broken
+## The 59 checks
 
-**1. Admission department and type were age-blind.** `gen_admissions()` picked `department_id` and `admission_type` uniformly at random, with no reference to the patient's age. A newborn could land in Cardiology; `admission_type = 'Newborn'` could be assigned to an 80-year-old.
+Every check is a SQL query that counts violations. They are grouped by what they catch. The descriptions match the Data Quality page of the dashboard.
 
-*Fix:* age-bucketed pools (`NEWBORN_DEPT_POOL`, `PEDIATRIC_DEPT_POOL`, an adult pool excluding Pediatrics) and admission-type sampling that excludes `'Newborn'` outright for non-newborn patients.
+| Group | Checks | What it catches | Repaired? |
+|---|---|---|---|
+| 1. Temporal | 10 | Dates out of order: discharge before admission, a diagnosis, procedure, test or triage record outside the stay, a test result before the test, a bill before discharge, a payment before the bill | Yes |
+| 2. Age-based | 6 | Age that does not fit the context: a "newborn" admission for a patient older than 0, a child admitted to Geriatric, an adult admitted to Pediatrics, a newborn-only diagnosis code on an older patient | Yes |
+| 3. Admission type | 8 | Scheduled (future) admissions that already have triage, diagnoses, procedures, medications, tests, a bill or a room; an emergency admission with a low-urgency (ESI 4–5) triage | Yes |
+| 4. Department consistency | 3 | An admitting doctor or a room from a different department than the admission; a room type that does not suit the patient's condition (for example an "Intensive" patient in a standard room) | Yes |
+| 5. Diagnosis alignment | 3 | A pregnancy or breast-cancer code on a male patient, a prostate-cancer code on a female patient, a newborn-only code on an adult | Yes |
+| 6. Financial | 5 | A bill total that is not the sum of its line items; a denied bill that still shows coverage; a written-off bill that still charges the patient; payment dates that do not match payment status | Yes |
+| 7. Operational realism | 18 | Things that look wrong in a join or on a dashboard: more patients admitted than a department has beds, a room holding more patients than it has beds, a patient admitted while still in an earlier stay, a patient "admitted" for over 60 days, a billed procedure that belongs to a different admission, a patient registered before they were born, staff recorded acting before their hire date | No (detect-only) |
+| 8. Clinical coherence | 6 | Treatments that contradict the patient or diagnosis: a delivery on a patient who is not female or not of childbearing age, chemotherapy with no cancer diagnosis, insulin or metformin with no diabetes diagnosis, a Pap smear on a patient who is male or under 21 | No (detect-only) |
 
-**2. `sample_diagnosis()` was called with no filters at all.** `gen_diagnoses()` sampled from the full 66-code ICD-10 list, department and gender/age unfiltered — routinely producing e.g. pregnancy-only codes (`O80`, `O34.21`, ...) for male patients.
+Groups 1 to 6 were written alongside the generator, so a clean result there shows the generator follows its own rules. Groups 7 and 8 were written afterwards and deliberately not designed around, to catch problems the generator was never built to avoid. They only report, because repairing them (for example a bill line that points at another patient's procedure) would mean inventing data.
 
-*Fix:* `_sample_valid_diagnosis()` samples department-filtered first, then rejects gender/age-impossible codes with a bounded resample. Testing this in isolation found the resample loop alone still left a **~6.7% residual failure rate** for male patients admitted to OB/GYN — that department's diagnosis pool is almost entirely female-only codes, so 10 attempts wasn't always enough. Added a full-list fallback; verified 0/5,000 residual violations across three scenarios before shipping (and the same property is now a unit test). A cleaner design would filter the pool to allowed codes once and draw a single weighted sample — no retry loop to fail silently.
+## Round one: generator fixes
 
-**3. Room assignment ignored `patient_condition`.** *Fix:* room candidates are filtered to the room types allowed for that condition (`CONDITION_ROOM_MAP`), falling back to any in-department room only when none exists.
+The first generator produced rows that were individually plausible but collectively wrong. Four causes were found by reading the generator against the validator's rules:
 
-**4. `gen_billing()`'s `bill_date` ignored `discharge_date`.** *Fix:* anchored to `discharge_date` (+0–90 days).
+| Problem | Fix |
+|---|---|
+| Admission department and type ignored the patient's age (a newborn in Cardiology; the type "Newborn" on an 80-year-old) | Age-bucketed department pools; "Newborn" only for newborns |
+| Diagnoses were sampled with no department, sex or age filter (pregnancy codes on male patients) | Department-filtered sample that rejects sex- and age-impossible codes, with a whole-catalog fallback (a resample loop alone still failed about 6.7% of the time for male patients in OB/GYN, whose diagnosis pool is almost all female-only; this is a unit test) |
+| Room assignment ignored the patient's condition | Rooms filtered to the types allowed for the condition (since replaced by the allocator in round four) |
+| Bill dates ignored the discharge date | Bills dated 0 to 90 days after discharge |
 
-Items 1–4 were found by reading code and reasoning about what the validator would catch. They were not measured at the time; that has since been done by running the **archived pre-patch generator** (`hospital_generator_legacy.py`, kept outside this repo) through the 51 checks that existed then at all three scales, each in its own process with the same seed. Results are in `docs/validation_runs/legacy_generator_*.csv`. At large scale, before any repair:
+The archived pre-patch generator is not in this repository, so the comparison below can only be re-checked from the committed results files (`docs/validation_runs/legacy_generator_*.csv`), which came from running its output through the 51 checks that existed then, at each scale, each in its own process with the same seed. At large scale, before any repair:
 
 | Group | Pre-patch generator | Current generator |
 |---|---|---|
 | 1 · Temporal | 1,548 | 0 |
-| 2 · Age-based | 4,250 | 65 |
+| 2 · Age-based | 4,250 | 70 |
 | 3 · Admission type | 14,645 | 0 |
 | 4 · Department | 5,119 | 0 |
 | 5 · Diagnoses | 1,803 | 0 |
 | 6 · Financial | 10,936 | 0 |
 | 7 · Realism (detect-only) | 61,231 | 0 |
-| **Total** | **99,532** | **65** |
+| **Total** | **99,532** | **70** |
 
-(Small: 6,177 → 194. Medium: 25,681 → 83. The pre-patch column covers the 51 checks that existed then; Group 8 was written later and was not run against that output. The current-generator column is the latest regenerated run, which is why it differs slightly from earlier drafts of this table.) This confirms the reasoning above: the round-one patches targeted groups 1, 2, 4 and 5, which together fell from 12,720 violations (1,548 + 4,250 + 5,119 + 1,803) to 65 — while groups 3 and 6 were untouched until round two. It does *not* attribute the improvement to individual patches; only the doctor fix has its own before/after.
+(Small: 6,177 → 2. Medium: 25,681 → 21. The pre-patch column covers the 51 checks that existed then; Group 8 and the new room check were written later and were not run against that output. The current column is the latest recorded run.) The round-one patches targeted groups 1, 2, 4 and 5, which together fell from 12,720 violations (1,548 + 4,250 + 5,119 + 1,803) to 70; groups 3 and 6 were untouched until round two. The improvement is measured for the patches together, not for each one separately.
 
-**The old generator's output could not be repaired.** Run through today's `repair_all()`, the pre-patch data makes the repair step crash at every scale: moving a bill's date forward to its discharge date violates the table's own `CHECK (payment_date >= bill_date)` constraint (MariaDB error 4025 on `chk_payment_date`), because those bills had been given payment dates before the discharge they were being moved to. So "after repair" numbers don't exist for it. (The repair code was unchanged in that statement; the current generator never produces the conflicting dates.) This is a measured fact about this repair code on this data, not a claim about what the original author's loop did on their machine.
+**The pre-patch output cannot be repaired.** Run through the current `repair_all()`, it fails at every scale: moving a bill's date forward to its discharge date violates the table's own `CHECK (payment_date >= bill_date)` constraint (MariaDB error 4025 on `chk_payment_date`), because those bills had payment dates before the discharge. The current generator never produces the conflicting dates.
 
-### A fifth bug, found by testing at small scale
+### Departments with no doctors
 
-Testing the patched generator with `main('small')` (25 doctors, 20 departments) surfaced something none of the four items above explained: `doctor_dept_mismatch` violations that **the repair pipeline could not fix at all** — `repair_department()` logged "Reassigned doctors for 0 admissions" every time, despite hundreds of violations.
+At small scale (25 doctors, 20 departments), random assignment left 10 departments, Pediatrics among them, with no doctor. Admissions routed there produced `doctor_dept_mismatch` violations that repair could not fix, because there was no doctor in the department to reassign to (the repair log read "Reassigned doctors for 0 admissions" against 294 violations). The generator now guarantees at least one doctor per department, the same guarantee rooms already had. This is the one round-one fix with its own before and after: 294 → 0.
 
-Root cause: `gen_doctors()` assigns each doctor's department via `random.choice(SPECIALTY_TO_DEPARTMENT[specialty])`, with no minimum-per-department guarantee. At 25 doctors across 20 departments, **10 departments — including Pediatrics — ended up with zero doctors.** Any admission routed there produces a mismatch with no doctor in that department to reassign to. `gen_rooms()` already had exactly this guarantee; `gen_doctors()` never got the equivalent treatment.
+## Round two: independent realism checks
 
-*Fix:* the same guaranteed-one-per-department pattern in `gen_doctors()`. This is the one fix with a measured before/after: 294 → 0 `doctor_dept_mismatch` violations at small scale. It is also very plausibly the real root cause of the original "regenerate → repair → still broken" complaint, since it made a whole violation category permanently unrepairable no matter how many times the loop ran.
+Round one ended with a validator that reported almost nothing, as expected, because the generator had been built to satisfy its rules. Group 7 was added afterwards: each rule catches something that looks wrong on the dashboard or in a join. Run against the large dataset the earlier generator had produced (groups 1–6 reported **19** violations on it, a fixed baseline in `docs/validation_runs/baseline_before_fixes_large.csv`), the 16 realism checks that existed then found:
 
-## Second round: independent checks
-
-Round one ended with a validator that reported almost nothing — which is exactly what you'd expect, because **the generator had been built to satisfy the validator's own rules.** Groups 1–6 were written alongside the generator and the constants are copied between them. "Zero violations" there means "consistent with rules I already knew about".
-
-So Group 7 (16 checks, `validate_realism()` in `src/validate_repair.py`) was added *afterwards* and deliberately not designed around: each rule catches something that looks wrong on the dashboard or in a join. It is **detect-only** — there is no repair, because fixing e.g. a bill line that points at another patient's procedure would mean fabricating data.
-
-Run against the large dataset the generator had produced *before* these fixes (groups 1–6 reported **19** violations on it):
-
-| Check | Pre-fix violations | What was wrong | Fix in the generator |
+| Check | Violations | What was wrong | Fix in the generator |
 |---|---|---|---|
-| `shift_before_hire_or_wrong_dept` | 18,241 | Shifts before a person's hire date, in departments they don't work in | Shifts start after hire, in the staff member's own department |
-| `staff_event_before_hire` | 10,343 | Doctors/nurses acting before their hire date | `StaffPool` only offers staff already hired on the event's date |
-| `procedure_item_wrong_admission` | 8,232 | Billed procedures belonging to other admissions | Bills built bottom-up from the admission's own records |
+| `shift_before_hire_or_wrong_dept` | 18,241 | Shifts before a person's hire date, in departments they do not work in | Shifts start after hire, in the staff member's own department |
+| `staff_event_before_hire` | 10,343 | Doctors and nurses acting before their hire date | Only staff already hired on the event's date are offered |
+| `procedure_item_wrong_admission` | 8,232 | Billed procedures belonging to other admissions | Bills built from the admission's own records |
 | `lab_item_wrong_admission` | 6,499 | Same, for lab tests | same |
 | `cancelled_has_clinical_records` | 4,187 | Cancelled admissions with diagnoses, procedures, medications, tests | Only admissions that happened get clinical records |
-| `procedure_or_lab_item_missing_link` | 2,665 | Line items with no procedure/test (deleted by repair, FK set `NULL`) | same |
-| `stale_admitted_over_60d` | 2,409 | Patients "currently admitted", one since 2020-01-01 | Status follows from dates: a stay that hasn't ended yet is `Admitted` |
+| `procedure_or_lab_item_missing_link` | 2,665 | Line items with no procedure or test (deleted by repair, foreign key set `NULL`) | same |
+| `stale_admitted_over_60d` | 2,409 | Patients "currently admitted", one since 2020-01-01 | Status follows from dates: a stay that has not ended is `Admitted` |
 | `bill_on_undischarged_admission` | 2,409 | Bills for patients still in the hospital | Bills only for discharged admissions |
 | `scheduled_in_past` | 1,820 | "Scheduled" admissions dated in the past | Scheduled admissions are future-dated |
-| `pediatric_vitals_implausible` | 911 | Infants 140–200 cm / 45–150 kg at triage | Age-banded vitals |
+| `pediatric_vitals_implausible` | 911 | Infants 140–200 cm and 45–150 kg at triage | Age-banded vitals |
 | `bill_before_admission` | 555 | Bills dated before the admission began | Bills only after discharge |
-| `staff_hired_before_age_21` | 314 | Doctors/nurses hired as children | Hire dates respect a minimum age |
+| `staff_hired_before_age_21` | 314 | Doctors and nurses hired as children | Hire dates respect a minimum age |
 | `admission_before_birth` | 298 | Admissions before the patient was born | Admission dates drawn from birth onward; newborns admitted at birth |
-| `registered_before_birth` | 202 | Registered before being born | Registration dates ≥ birth (generator and repair) |
-| `census_exceeds_bed_capacity` | 20 | Every department over its bed count | (follows from the status fix) |
-| `registered_in_future` | 0 | — | (guarded in repair, since scheduled admissions are now in the future) |
+| `registered_before_birth` | 202 | Registered before being born | Registration dates on or after birth |
+| `census_exceeds_bed_capacity` | 20 | Every department over its bed count | follows from the status fix |
+| `registered_in_future` | 0 | none | guarded in repair, since scheduled admissions are in the future |
 | **Total** | **59,105** | | |
 
-(`staff_hired_before_age_21` was added after the baseline run, so its 314 was computed from the old dataset's committed CSVs rather than read from the live database. The baseline file is `docs/validation_runs/baseline_before_fixes_large.csv`.)
+(`staff_hired_before_age_21` was added after the baseline run, so its 314 was computed from the old dataset's committed CSVs, not read from the live database. Including its 19 Group 2 violations, the whole baseline file totals 59,124.)
 
-Several of these — admissions before birth, staff hired as children, doctors acting before being hired — were not on any list before the independent checks were written; they were found by asking "what else would be impossible?" rather than "what did the generator already know about?".
+Billing is now generated from the admission's own room stay, completed procedures, tests and medications, so a bill's total is the sum of its line items and line items cannot point at another admission. Scheduled and cancelled admissions never receive clinical records. As a result, groups 3 and 6 have no violations before repair. A "Newborn" admission can occur once per patient; what remains before repair is each newborn's registration date, which cannot be known when patients are created (they are generated before admissions), so repair sets it.
 
-Two side effects worth knowing:
+## Round three: clinical coherence
 
-- **Groups 3 (admission type) and 6 (financial) are now prevented, not repaired.** Previously ~99.7% of the "before repair" count was those two groups — `Scheduled` admissions that still had clinical rows, and bill totals that never matched their line items — which repair cleared by deleting rows and recomputing. Billing is now generated bottom-up (the total *is* the sum of its line items), and scheduled/cancelled admissions are never given clinical records.
-- **`Newborn` admissions can only occur once per patient**, which removed most of the old "two newborn admissions on different dates" edge case. What remains before repair is patients' `registered_date`, which can't be known when patients are created (they're generated before admissions); repair sets it.
-
-## Third round: clinical coherence
-
-Round two made sure the *dates, counts and money* were consistent. It said nothing about whether a treatment made sense for the patient: procedures, medications and tests were each drawn uniformly at random from their catalogs, independent of the diagnoses and of who the patient was.
-
-**Measured first.** Six clear-cut contradictions were written as a new check group (Group 8, `validate_clinical_coherence()`), then run against the large dataset that was live at the time, before touching the generator:
+Procedures, medications and tests had been drawn uniformly at random from their catalogs, independent of the diagnoses and the patient. Six clear-cut contradictions were written as Group 8 (`validate_clinical_coherence()`) and run against the large dataset of the time, before touching the generator:
 
 | Check | Violations | What it caught |
 |---|---|---|
@@ -98,59 +99,71 @@ Round two made sure the *dates, counts and money* were consistent. It said nothi
 | `delivery_wrong_patient` | 711 | A delivery on a patient who is not female or not aged 12–55 (445 of 907 deliveries were on male patients) |
 | `cancer_treatment_without_cancer_dx` | 680 | Chemotherapy or radiation with no cancer diagnosis (680 of the 839 such procedures) |
 | `pap_smear_wrong_patient` | 480 | A Pap smear on a patient who is not female or is under 21 |
-| `adult_surgery_on_minor` | 306 | Bypass surgery, hip/knee replacement or hip-fracture fixation on a patient under 18 |
+| `adult_surgery_on_minor` | 306 | Bypass surgery, hip or knee replacement or hip-fracture fixation on a patient under 18 |
 | **Total** | **4,699** | |
 
-(The baseline is kept in `app/data/validation_baseline_pre_coherence.csv`, a fixed historical artifact like the Group 7 baseline.)
+The baseline is `app/data/validation_baseline_pre_coherence.csv`. `data/clinical_rules.py` maps each ICD-10 code to a family (cardiac, respiratory, diabetes, oncology, obstetric and so on) and each family to plausible procedures, drugs and tests, with code-level overrides where one code is far more specific (appendicitis leads to an appendectomy; type 1 diabetes gets insulin only). A fifth of treatments come from a general-care pool (acetaminophen, a metabolic panel, a ward round). Eligibility filters use the patient's sex and age at admission, from `birth_date`: deliveries need a female patient of childbearing age, major adult surgery needs an adult, a Pap smear needs a woman of 21 or over, and a few drugs are withheld from young children.
 
-**The fix** is `data/clinical_rules.py`: each ICD-10 code maps to a family (cardiac, respiratory, diabetes, oncology, obstetric, …), and each family to the procedures, drugs and tests that plausibly go with it, with code-level overrides where one code is far more specific (appendicitis → appendectomy; type 1 diabetes → insulin only). A fifth of treatments come from a "general care" pool (acetaminophen, a metabolic panel, a ward round) so not everything is diagnosis-driven. Eligibility filters use the patient's sex and **age at admission** (from `birth_date`, not the stored snapshot): deliveries need a female patient of childbearing age, major adult surgery needs an adult, a Pap smear needs a woman of 21 or over, and a few drugs are withheld from young children.
+Group 8 is written separately from CPT codes and drug names, not from the generator's mapping, so it tests the output instead of repeating the generator's rules. It finds 0 violations before repair at all three sizes. The mapping is coarse and hand-built, not clinical guidance: Group 8 catches contradictions, not oddness. The diabetes rule is deliberately strict (hospitals do sometimes give insulin to patients without diabetes).
 
-**Why the check isn't just the generator marking its own homework.** Group 8 is written separately, from CPT codes and drug names rather than the generator's procedure ids or its mapping, and it only encodes hard contradictions. The generator's code never reads it, and it is detect-only.
+## Round four: occupancy
 
-**Result:** 0 violations before repair at all three scales (the integration test asserts this, since Group 8 has no repair to fall back on). The rest of the pipeline is unchanged; the same single scarcity case remains at small and medium scale. Procedure and drug mixes changed accordingly — the old uniform draw gave every procedure about the same share; now chest X-ray, CT, echocardiography and endoscopy lead, and chemotherapy appears only with cancer diagnoses.
+The hospital had been nearly empty: 12,000 admissions over about 6.7 years left roughly 20 inpatients on average against 338 beds and 560 rooms (about 6%). Nothing stopped two stays sharing a room or one patient being in two beds at once; the emptiness hid both.
 
-**What this does not do.** The mapping is coarse and hand-built, not clinical guidance. Group 8 catches contradictions, not oddness: a drug that fits the family but not the specific condition passes. The diabetes rule is deliberately strict (real hospitals do give insulin to non-diabetic patients with high blood sugar, rarely). Medications and procedures are linked to the diagnoses, not to each other or to timing. Staff attribution is still hospital-wide rather than by department, and `age` on the patient row is still a snapshot (Group 8 uses age at admission instead).
+- **One-year window.** Admissions cover the last 365 days (`ADMISSION_WINDOW_DAYS`), with the same admission counts per size (800, 3,200, 12,000). Staff and patient identities and birth dates are unchanged.
+- **Rooms sized from load.** `data/occupancy.py` computes each department's expected patient-days from how patients are routed by age and the stay-length distribution, then sizes each room type for a planned occupancy (`OCCUPANCY_TARGET`: Standard 60%, Private 58%, ICU 78%, NICU 75%, Isolation 55%, applied 10% tighter because rounding up to whole rooms leaves the realised figure below plan). Every department has at least one Standard and one ICU room. OR, ER and Recovery rooms exist but never hold an admission and are not beds. A department's `bed_capacity` is the sum of its inpatient rooms' beds.
+- **One bed per patient, none over capacity.** Admissions are placed in date order. A stay cannot start before the same patient's previous stay ends (it moves to that time; a later admission for a patient still in hospital is cancelled), and a room never holds more patients than it has beds. A patient with no suitable bed waits for one (up to a week, `MAX_BED_WAIT_HOURS`; a newborn up to a day), then is placed at a lower level of care, and is cancelled only if no bed frees in time. Waiting moves the admission and discharge dates together.
+- **Two new Group 7 checks.** `room_double_booked`: with rooms assigned the old way (a random suitable room, no capacity check) in this one-year hospital it would find 5,127 double-booked stays at large size and 1,050 at medium. `patient_overlapping_admissions`: stays that begin while the patient is in an earlier one; random dates had produced 37 (0.34%) in the earlier six-year data and 208 (1.9%) in the one-year data. Both baselines are in `app/data/validation_baseline_pre_occupancy.csv`; both checks find 0.
+
+Measured on the generated data, averaged over the days after a 45-day warm-up (the hospital starts empty):
+
+| Size | Rooms | Inpatient beds | Average census | Average bed occupancy | Busiest day |
+|---|---|---|---|---|---|
+| Small | 47 | 62 | 9 | 15% | 31% |
+| Medium | 75 | 84 | 37 | 44% | 57% |
+| Large | 204 | 218 | 138 | 63% | 76% |
+
+At large size, average occupancy is Standard 61%, Private 68%, ICU 68%, Isolation 47% (NICU has 2 beds), and the condition mix stays close to the drawn mix (Intensive 14.0% against 15%). Keeping rooms within capacity took, at large size, 2,168 admissions (20%) waiting for a bed (mean 44 hours), 120 (1.1%) placed at a lower level of care, 225 (2.1%) moved to after the same patient's previous stay and 19 (0.18%) cancelled; at medium, 587 (20%) waited, 90 (3.1%) were stepped down and 8 cancelled; at small, 58 (8%) waited and 12 (1.7%) were stepped down. Each department's rooms are a separate pool, and small pools are often full, so some waiting is unavoidable at a realistic occupancy. Small and medium stay sparse because every department needs an ICU and a Standard room: a floor, not a target.
+
+**Census** is the number of patients in an inpatient bed at midnight; **bed occupancy** is census divided by inpatient beds (Standard, Private, ICU, NICU, Isolation). The dashboard and practice question 11 use these definitions.
 
 ## Results across scale
 
-Each run: generate, `validate_all()` before any repair, `repair_all()`, `validate_all()` again. "Before repair" is what the generator produced by itself. Per-run reports are in `docs/validation_runs/`; the dashboard's Data Quality page shows them.
+Each run: generate, validate before any repair, repair, validate again. "Before repair" is what the generator produces by itself. Per-run reports are in `docs/validation_runs/`.
 
-| Scale | Admissions | Before repair | After repair | What remains before / after |
+| Scale | Admissions | Before repair | After repair | What remains before repair |
 |---|---|---|---|---|
-| Small | 800 | 194 | 67 | 192 room-scarcity + 2 newborn registration dates / room-scarcity only |
-| Medium | 3,200 | 83 | 2 | 73 + 10 / room-scarcity only |
-| Large | 12,000 | 65 | 0 | 65 newborn registration dates / nothing |
+| Small | 800 | 2 | 0 | 2 newborn registration dates |
+| Medium | 3,200 | 21 | 0 | 21 newborn registration dates |
+| Large | 12,000 | 70 | 0 | 70 newborn registration dates |
 
-**Retraction.** Earlier versions of this document and the README reported "25,720 → 22" at large scale and "99.9% eliminated". That was real arithmetic but misleading: it credited the generator for what repair was doing, and the groups the generator patches targeted accounted for only 84 of those violations. The table above is the honest version — and it is better, because the generator now prevents most of what repair used to clear.
+The newborn registration date is the only thing repair changes at any size. (When rooms were assigned at random, a department with no room suited to a patient's condition left a few `condition_room_mismatch` violations at small and medium scale; the room allocator removed that case.)
 
-The one residual that matters is **`condition_room_mismatch`**: it occurs when a department genuinely has no room of the type a patient's condition calls for (worst at small scale, where the room pool is thinnest). Repair downgrades the recorded condition rather than fabricate a room.
+## Pipeline, dashboard and reproducibility
 
-The recorded runs above drifted by a few violations between regenerations (e.g. 1,503 vs 1,504 in two otherwise identical small runs) because "now" was the wall clock and the repair step used SQL `RAND()`. Both are gone: the pipeline reads one reference date (`AS_OF`, from `data/shared_rules.py`, pinned with `HOSPITAL_AS_OF`), repair picks its values from a hash of each row's id instead of `RAND()`, and repair only touches rows that actually violate a rule. With the date pinned, two runs give identical tables and a second repair changes nothing (both tested). The numbers in the table predate this change.
-
-## Pipeline and dashboard
-
-- `src/run_pipeline.py` runs everything in one command — generate → validate → repair → validate → export — and writes `app/data/validation_report.csv` (per-check before/after), a small metadata file, and a per-scale summary the dashboard reads.
-- `src/export_to_csv.py` exports the repaired database to `app/data/` so the dashboard never needs a live database connection — it works identically locally and on Streamlit Community Cloud (live at [synthetic-hospital-db.streamlit.app](https://synthetic-hospital-db.streamlit.app/)), which can't reach a local database.
-- The dashboard's **Data Quality** page presents the validation results: violations by group before vs. after repair, results at each scale, what the independent checks found in the pre-fix data, and every rule with a plain-language description.
-- Colors (`app/utils.py`) are assigned by category identity, not chart-local rank, and separate evaluative "status" colors from plain categorical identity and from ordinal severity scales. Layout conventions: a 13px minimum font, long chart labels wrapped to at most two lines by `wrap_label()`, KPI stat-tile cards via `render_kpi_row()` in the same position on every page (Admissions & Census reserves the slot above its filters and fills it once they're applied), and a drag-to-zoom hint under every zoomable chart via `plot()`.
-- The palette slots were run through the dataviz skill's validator (`validate_palette.py`, light mode, surface `#fcfcfb`) for every multi-series chart. It found one real problem: the shift chart used orange and red (slots 2 and 8), only ΔE 7 apart even with full colour vision (hard-fail floor 15); it now uses slots 4/1/7 (worst gap 16.3). Everything else passes. Remaining warning, by design: aqua, yellow and magenta are under 3:1 contrast on the background, so every chart has a table view. The ordinal condition ramp passes the ordinal checks (monotone lightness, single hue); run as a categorical palette it would fail by design. Not run: dark mode, since the dashboard is light-only.
+- `src/run_pipeline.py` runs generate → validate → repair → validate → export in one command and writes `app/data/validation_report.csv` (per-check before and after), a small metadata file and a per-scale summary the dashboard reads. `src/export_to_csv.py` exports the repaired database to `app/data/`, so the dashboard needs no live database and works the same locally and on Streamlit Community Cloud.
+- The dashboard's **Data Quality** page presents the validation results; **Admissions & Census** includes the occupancy measures. Layout and colour decisions are in [DASHBOARD.md](DASHBOARD.md).
+- **Reproducibility.** Seeds are fixed, and the whole pipeline reads one reference date (`AS_OF` in `data/shared_rules.py`), set with `HOSPITAL_AS_OF`; unpinned it is the wall clock, so counts shift slightly between runs. Faker's own `date_of_birth()` reads the system clock, so the generator computes staff birth dates from `AS_OF` instead. Repair picks values from a hash of each row's id (no `RAND()`) and changes only rows that violate a rule. With the date pinned, two runs give identical tables and a different date gives different tables; running repair a second time changes nothing. The integration tests check all three.
 
 ## Tests
 
-- `tests/test_generator_units.py` — pure logic: age sampling, hire dates, `StaffPool` (nobody acts before being hired), diagnosis sampling never returning impossible codes, age-banded vitals, and that the constants copied between the generator and validator stay identical.
-- `tests/test_validator_and_app.py` — the rule set (57 unique rules, each with a dashboard description) and dashboard helpers, including the per-chart table views.
-- `tests/test_clinical_rules.py` — the diagnosis-to-treatment mapping: everything it names exists in the catalogs, and the eligibility rules (no deliveries for men, no chemotherapy without cancer, no insulin without diabetes, …) hold over hundreds of seeded draws.
-- `tests/test_shipped_data.py` — pandas re-implementations of the realism rules, run against the CSVs actually shipped in `app/data/`, so a regression is caught without a database. Run against the *pre-fix* CSVs from git history, 8 of its tests fail — i.e. they do detect the original problems.
-- `tests/test_pipeline_integration.py` — the whole pipeline against a real database; asserts all 57 checks run, that groups 3, 6 and 8 have zero violations *before* repair, that only room scarcity remains after, that two runs with the same pinned reference date produce identical tables, and that running repair a second time changes nothing. Runs only when `HOSPITAL_DB_URL` is set, because it regenerates the target database.
-- `.github/workflows/ci.yml` runs the first three on Python 3.11 and the fourth against a MariaDB 10.4 service container. Both jobs passed on their first run.
+- `test_generator_units.py`: pure logic: age sampling, hire dates, nobody acting before being hired, no impossible diagnosis codes, age-banded vitals, constants shared by generator and validator, no wall-clock reads.
+- `test_clinical_rules.py`: the diagnosis-to-treatment mapping (everything it names exists; no deliveries for men, chemotherapy without cancer or insulin without diabetes over hundreds of seeded draws).
+- `test_occupancy.py`: room planning, and allocation (no room over capacity, no patient in two beds, waits only move an admission later, step-down after a long wait, a newborn waits at most a day).
+- `test_validator_and_app.py`: the rule set (59 unique rules, each with a dashboard description), the chart table views and the census calculation.
+- `test_practice.py`: every practice solution runs, the four data-quality solutions return no rows, and the SQL census matches the dashboard's.
+- `test_shipped_data.py`: pandas versions of the realism rules run against the CSVs in `app/data/`, so a regression is caught without a database. When first written, 8 of these tests failed against the pre-fix CSVs from git history.
+- `test_pipeline_integration.py`: the whole pipeline against a real database. All 59 checks run; groups 3, 6 and 8 and the room and patient-overlap checks have no violations before repair; the same pinned date gives identical tables and a different date different tables; repair run twice changes nothing; the room check fires when two stays are forced into one bed. It regenerates the target database, so it runs only when `HOSPITAL_DB_URL` is set.
+- `.github/workflows/ci.yml` runs the tests that need no database on Python 3.11, and the integration tests against a MariaDB 10.4 container.
 
 ## Known limitations
 
-- **The checks measure consistency with rules the author wrote**, not clinical realism. The diagnosis-to-treatment mapping is coarse and hand-built (see the third round); Group 8 catches contradictions, not oddness. Age follows a hand-set curve (`AGE_BANDS`), and vitals ranges are plausible bands, not clinical references.
-- **The hospital is mostly empty.** 12,000 admissions across ~6.7 years is ~5 a day with a mean stay of ~5 days, so the true census is a few dozen patients against 560 rooms. Admission *volume* was kept at the original sizes rather than inventing a denser calendar.
+- **The checks measure consistency with rules I wrote**, not clinical realism. The diagnosis-to-treatment mapping is coarse and hand-built; Group 8 catches contradictions, not oddness. Age follows a hand-set curve (`AGE_BANDS`), and vitals ranges are plausible bands, not clinical references.
+- **Diagnosis weights are hand-assigned judgement** (2.5 to 9.5, common conditions higher), not taken from CMS/HCUP or any study. The catalog is 66 ICD-10 codes in 13 categories.
+- **Occupancy has side effects.** Keeping rooms within capacity means about 1 in 5 admissions starts when a bed frees, not at the drawn time, and a small share of patients are recorded at a lower level of care than drawn. Small and medium sizes are sparse (15% and 44% bed occupancy).
 - **Groups 7 and 8 have no repair**, by design; they only report.
-- **No live-DB mode** — the dashboard is CSV-only by design; re-run the pipeline after any regeneration and push the result to refresh the deployed app.
-- **Patient SSN/phone/email/address columns are kept in the CSVs** as Faker-generated placeholders; the dashboard doesn't read them.
-- **Staff-to-department rules are strict only where checked**: diagnoses, procedures, medications and tests are attributed to any already-hired doctor in the hospital, not the admission's department.
-- **Developed on MariaDB 10.4 (XAMPP)**; MySQL 8 and other Python versions are untested outside CI.
-- **The synthetic ICD-10 catalog is 66 codes across 13 categories** — enough for realistic-looking department/gender/age-consistent diagnosis distributions, not real clinical epidemiology. The per-code weights (2.5 to 9.5) are hand-assigned judgement of relative commonness, not taken from CMS/HCUP or any study.
+- **Staff are attributed hospital-wide**: diagnoses, procedures, medications and tests go to any already-hired doctor, not one from the admission's department.
+- **`patients.age` is a snapshot** taken at generation; department routing uses it, while Group 8 and the treatment rules use age at admission.
+- **Diagnosis sampling** uses a bounded resample with a whole-catalog fallback; filtering the pool once and drawing once would be simpler and could not fail silently.
+- **No live-database mode.** The dashboard reads only the CSVs; re-run the pipeline and push the result to refresh the deployed app.
+- **Developed on MariaDB 10.4.** MySQL 8 is untested; CI covers Python 3.11 and MariaDB 10.4 only.

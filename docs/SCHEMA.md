@@ -44,7 +44,7 @@ erDiagram
 
 | Table | Key columns | Notes |
 |---|---|---|
-| `departments` | `department_id` (PK), `dep_name`, `floor_number`, `bed_capacity` | 20 fixed departments. Referenced by almost every other table. |
+| `departments` | `department_id` (PK), `dep_name`, `floor_number`, `bed_capacity` | 20 fixed departments. Referenced by almost every other table. `bed_capacity` is the number of inpatient beds, set by the generator to the sum of the beds in the department's inpatient rooms. |
 | `payers` | `payer_id` (PK), `payer_name`, `payer_type` (ENUM), `contact_phone` | 10 payers across 6 `payer_type` values (Medicare, Medicaid, Private Insurance, Self-Pay, Workers Compensation, CHIP), each with a fixed coverage rate in the generator/repair scripts. |
 | `procedures` | `procedure_id` (PK), `procedure_code`, `procedure_name`, `department_id` (FK), `base_cost`, `duration_minutes` | 30-procedure catalog, CPT-style codes. |
 
@@ -56,7 +56,7 @@ erDiagram
 | `doctors` | `doctor_id` (PK), `specialty`, `department_id` (FK), `hire_date` | `specialty` drives department assignment via `SPECIALTY_TO_DEPARTMENT` in the generator. Every department is guaranteed at least one doctor (see [METHODOLOGY.md](METHODOLOGY.md)). |
 | `nurses` | `nurse_id` (PK), `position`, `department_id` (FK), `hire_date` | `position` drives department assignment via `NURSE_POSITION_TO_DEPARTMENT`. |
 | `employees` | `employee_id` (PK), `position`, `department_id` (FK, nullable), `salary` | Non-clinical staff; `department_id` is `NULL` for hospital-wide roles (IT, HR, etc.). |
-| `rooms` | `room_id` (PK), `room_type` (ENUM), `department_id` (FK), `status` | 8 room types (Standard, Private, ICU, NICU, OR, ER, Recovery, Isolation). Every department is guaranteed at least one room. |
+| `rooms` | `room_id` (PK), `room_type` (ENUM), `department_id` (FK), `status` | 8 room types (Standard, Private, ICU, NICU, OR, ER, Recovery, Isolation) with `bed_capacity` per room (Standard 2, Private 1, ICU 1, NICU 1, Isolation 1, ER 2, Recovery 2, OR 1). Standard, Private, ICU, NICU and Isolation rooms are inpatient beds; OR, ER and Recovery rooms are procedure and visit spaces and never hold an admission. Rooms are sized from each department's expected patient load, every department has at least one Standard and one ICU room, and `status` shows `Occupied` for rooms holding a currently admitted patient. |
 
 ## Domain 3 — Clinical
 
@@ -85,8 +85,9 @@ Validation outputs written alongside them by `src/run_pipeline.py` (read by the 
 
 | File | Contents |
 |---|---|
-| `validation_report.csv` | One row per check (57): group, rule, violations before repair, violations after repair |
+| `validation_report.csv` | One row per check (59): group, rule, violations before repair, violations after repair |
 | `validation_report_meta.json` | Scale, run time, admission count, totals |
 | `validation_runs.csv` | One line per scale (small / medium / large): the latest recorded run |
 | `validation_baseline_pre_fix.csv` | The 51 checks run against the dataset produced *before* the realism fixes (a fixed historical artifact, not regenerated) |
 | `validation_baseline_pre_coherence.csv` | The six Group 8 clinical-coherence checks run against the large dataset produced *before* treatments followed diagnoses (4,699 violations; a fixed historical artifact) |
+| `validation_baseline_pre_occupancy.csv` | The room and patient overlap checks run against the one-year, sized hospital before they were enforced: `room_double_booked` with rooms assigned the old way (a random suitable room, no capacity check), `census_exceeds_bed_capacity` on the same data, and `patient_overlapping_admissions` before the fix (a fixed historical measurement at large size) |

@@ -2,165 +2,206 @@
 
 ![Hospital Operations dashboard](docs/screenshot.png)
 
-![Data Quality page — the 57 checks, before vs after repair](docs/screenshot_data_quality.png)
+![Data Quality page: the 59 checks, before vs after repair](docs/screenshot_data_quality.png)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Live Demo](https://img.shields.io/badge/dashboard-Live%20Demo-FF4B4B.svg?logo=streamlit&logoColor=white)](https://synthetic-hospital-db.streamlit.app/)
 
-**[Live Demo →](https://synthetic-hospital-db.streamlit.app/)**
+A realistic, fully synthetic hospital database for practising SQL and analytics: 17 related tables covering departments, staff, patients, admissions, clinical records and billing, with no real patient data.
 
-*The app runs on Streamlit's free tier and sleeps when idle — if you see a "This app has gone to sleep" screen, click **Yes, get this app back up!** and give it a few seconds.*
+**[Live dashboard →](https://synthetic-hospital-db.streamlit.app/)** *(it runs on Streamlit's free tier and sleeps when idle; if you see "This app has gone to sleep", click **Yes, get this app back up!** and give it a few seconds)*
 
-**100% synthetic — no real patient data.** A constraint-aware generator for a fully-relational 17-table hospital database (MySQL/MariaDB), a 57-check validation suite with an automatic repair step, and a 6-page dashboard built on top of it — including a Data Quality page that shows the validation results. Built to demonstrate data-engineering and data-quality thinking, not to model any real institution — see [Data Sources & References](docs/CITATIONS.md#synthetic-data-disclosure) for the full disclosure.
+Most synthetic data looks plausible row by row but falls apart when you join tables: a newborn admitted to Cardiology, a male patient with a pregnancy diagnosis, a bill dated before the discharge it covers. This dataset is generated and checked so the tables agree with each other, so a surprising query result is more likely to come from the query than from the data. For simulated patient lifetimes in standard health-record formats (FHIR, C-CDA, CSV), see [Synthea](https://github.com/synthetichealth/synthea); this dataset is instead one hospital's operational database, with rooms, beds, staff and billing, built for SQL practice.
 
-## Overview
+## What's included
 
-Most synthetic-data generators produce rows that are individually plausible but collectively wrong: a newborn admitted to Cardiology, a male patient diagnosed with a pregnancy complication, a bill dated before the discharge it covers, a doctor treating patients before they were hired. This project builds a generator that avoids those violations *at generation time*, checks the result with a 57-rule validator, repairs what slips through, and records — with real numbers — what each stage did.
+- **The dataset:** one year of admissions at a large hospital (12,000 admissions, 8,000 patients, about 200,000 rows in all) as CSV files in [`app/data/`](app/data/), plus `icd10_lookup.csv` (diagnosis names).
+- **The schema:** `data/hospital_db.sql` creates the 17 tables in MySQL or MariaDB with keys and `CHECK` constraints (rules the database enforces on every row). [docs/SCHEMA.md](docs/SCHEMA.md) describes each table.
+- **18 practice questions** with solutions, from a single table up to window functions and data-quality checks: [practice/](practice/).
+- **A dashboard** of six pages of charts you can zoom, each with a table view of the numbers behind it.
+- **A generator** that builds the data, so you can make your own at three sizes (below).
+- **Three executed notebooks:** exploratory analysis, a live data-validation run and worked SQL examples.
 
-**Real, verified results:**
-- 🏥 **17-table relational schema**: departments, staff, patients, admissions, clinical records, and billing — full FK graph, `CHECK` constraints, one polymorphic reference pattern (`staff_shifts.staff_id`)
-- 🐛 **A real bug found and fixed**: at small scale, 10 of 20 departments ended up with zero doctors — making a whole violation category *permanently unrepairable*. See [docs/METHODOLOGY.md](docs/METHODOLOGY.md#a-fifth-bug-found-by-testing-at-small-scale).
-- 🔍 **The validator was not independent, so I added checks that were**: the original six check groups were written alongside the generator, which was then built to satisfy them — on the generator's earlier output they reported **19** violations. Sixteen realism checks added afterwards (Group 7) found **59,105** in that same dataset: 2,409 patients "currently admitted" (one since 2020), bill lines pointing at other patients' procedures, doctors treating before they were hired. Every one was then fixed in the generator, and the checks now pass on fresh data. See [docs/METHODOLOGY.md](docs/METHODOLOGY.md#second-round-independent-checks).
-- 🩺 **Treatments now follow the diagnosis**: procedures, medications and tests used to be drawn at random, so a delivery could land on a male patient and chemotherapy on someone with no cancer diagnosis — **4,699** such contradictions across six checks (Group 8) in the earlier large dataset. The generator now picks treatments from each admission's own diagnoses and the patient's sex and age (`data/clinical_rules.py`); the same six checks find **0** at all three scales. The mapping is coarse and hand-built — it removes contradictions, it is not clinical guidance. See [docs/METHODOLOGY.md](docs/METHODOLOGY.md#third-round-clinical-coherence).
-- 🕰️ **Measured against the old generator**: the archived pre-patch generator produced **99,532** violations at large scale (against the 51 checks that existed then), and its output couldn't even be repaired — the repair step crashes on a `CHECK` constraint. The current generator produces 65 (of 57 checks). See [docs/METHODOLOGY.md](docs/METHODOLOGY.md#round-one-what-was-actually-broken).
-- 📉 **What each stage leaves behind**, latest recorded run at each scale — "before repair" is what the generator produced by itself:
+```mermaid
+erDiagram
+    departments ||--o{ doctors : employs
+    departments ||--o{ nurses : employs
+    departments |o--o{ employees : "employs (nullable)"
+    departments ||--o{ rooms : contains
+    departments ||--o{ procedures : offers
+    departments ||--o{ admissions : receives
+    departments ||--o{ staff_shifts : staffs
+    patients ||--o{ admissions : has
+    patients ||--o{ billing : "is billed"
+    payers ||--o{ billing : pays
+    doctors ||--o{ admissions : "admits"
+    doctors ||--o{ diagnoses : makes
+    doctors ||--o{ patient_procedures : performs
+    doctors ||--o{ medications : prescribes
+    doctors ||--o{ medical_tests : orders
+    nurses ||--o{ triage : records
+    nurses |o--o{ medical_tests : "assists (nullable)"
+    rooms |o--o{ admissions : "houses (null until admitted)"
+    admissions ||--o{ triage : has
+    admissions ||--o{ diagnoses : has
+    admissions ||--o{ patient_procedures : has
+    admissions ||--o{ medications : has
+    admissions ||--o{ medical_tests : has
+    admissions ||--o| billing : "billed once (discharged only)"
+    procedures ||--o{ patient_procedures : "catalog entry for"
+    billing ||--|{ billing_line_items : "totals to"
+    patient_procedures |o--o{ billing_line_items : "billed as (Procedure)"
+    medical_tests |o--o{ billing_line_items : "billed as (Lab)"
+```
 
-  | Scale | Admissions | Violations before repair | After repair |
-  |---|---|---|---|
-  | Small | 800 | 194 | 67 |
-  | Medium | 3,200 | 83 | 2 |
-  | Large | 12,000 | 65 | 0 |
+*`staff_shifts.staff_id` points at a doctor, a nurse or an employee depending on `staff_type`, so it is not a real foreign key.* Exact columns are in [docs/SCHEMA.md](docs/SCHEMA.md).
 
-  What remains at small/medium is one known case — a department with no room suited to a patient's condition. (Earlier versions of this README reported "25,720 → 22" at large scale; roughly 99.7% of that was repair clearing groups the generator didn't yet prevent. The generator now prevents them, so this table no longer flatters repair.)
+## Practice questions
 
-- 📊 **6-page Streamlit dashboard**, fully self-contained (bundled CSVs, no live DB dependency) — Overview, Admissions & Census, Clinical, Staffing, Financials, Data Quality
-- ✅ **Automated tests**: unit tests, CSV-level data tests (run against the shipped data, no database needed), and an end-to-end pipeline test, wired to a GitHub Actions workflow
-- 📓 **Three executed notebooks** with real, live-generated output (EDA, a live validation run, and SQL analysis)
+[`practice/questions.md`](practice/questions.md) has 18 questions with difficulty levels, skills and hints, and [`practice/solutions.sql`](practice/solutions.sql) has the answers (kept separate so they don't spoil the questions). They cover joins and dates, window functions (`ROW_NUMBER`, `LAG`, `PERCENT_RANK`), CTEs and recursive date series, the `staff_shifts` join, and four data-quality checks that should return no rows. The solutions are written for SQLite; [`practice/mysql_notes.md`](practice/mysql_notes.md) covers MySQL and MariaDB.
 
-## Quick Start
+## Quick start
+
+**Option 1: practise SQL with no server.** This builds a SQLite database from the shipped CSVs:
 
 ```bash
 git clone https://github.com/brianravelo28/synthetic-hospital-db.git
 cd synthetic-hospital-db
+pip install pandas
+python practice/load_sqlite.py       # writes practice/hospital.db
+sqlite3 practice/hospital.db         # or open it in any SQLite client; then try practice/questions.md
+```
+
+**Option 2: generate your own data (needs MySQL or MariaDB).** Development used MariaDB 10.4 via [XAMPP](https://www.apachefriends.org/); MySQL 8 is untested. Only the large size ships as CSVs; small (800 admissions) and medium (3,200) exist only if you generate them.
+
+```bash
 pip install -r requirements.txt
+mysql -u root < data/hospital_db.sql                 # create the schema
+python src/run_pipeline.py --size large              # or small / medium
 ```
 
-### Run the whole pipeline
+⚠️ The pipeline **truncates and regenerates every table** in the target database. It generates the data, validates it, repairs it, validates again, and exports everything the dashboard reads to `app/data/`. The connection string comes from `HOSPITAL_DB_URL` (default `mysql+pymysql://root:@localhost/hospital_db`). Set `HOSPITAL_AS_OF` (for example `2026-10-13 12:00:00`) to pin the date the data is generated "as of", for a reproducible run. Small and medium sizes are sparse: every department needs a few rooms, so at 800 admissions the hospital is mostly empty (about 15% bed occupancy at small, 44% at medium, 63% at large).
 
-Requires a local MySQL or MariaDB server (development used MariaDB 10.4 via [XAMPP](https://www.apachefriends.org/); MySQL 8 is untested).
+**The dashboard** needs no database; it reads the CSVs in `app/data/`:
 
 ```bash
-mysql -u root < data/hospital_db.sql          # create the schema
-python src/run_pipeline.py --size large        # or small / medium
+pip install -r requirements.txt
+streamlit run app/app.py             # → http://localhost:8501
 ```
 
-That one command generates the data, validates it, repairs it, validates again, and exports everything the dashboard reads (`app/data/*.csv`, including `validation_report.csv`). ⚠️ It **truncates and regenerates every table** in the target database. The connection string comes from `HOSPITAL_DB_URL` (default: `mysql+pymysql://root:@localhost/hospital_db`). Set `HOSPITAL_AS_OF` to pin the run's reference date for a reproducible run.
+Opening the repo in **GitHub Codespaces** does this for you (see `.devcontainer/`): it installs the pinned dependencies and starts the dashboard on port 8501, in a browser tab (GitHub blocks the embedded preview for private ports). The container has no database, so the pipeline needs a local MySQL or MariaDB instead.
 
-The individual steps are still importable (`data/hospital_generator.py`, `src/validate_repair.py`, `src/export_to_csv.py`) and the notebooks use them directly.
+## How the data is built
 
-### Launch the dashboard
+Each dataset goes through four steps:
 
-```bash
-streamlit run app/app.py            # -> http://localhost:8501
+```mermaid
+flowchart LR
+    G["Generate<br/>data/hospital_generator.py"] --> V1["Validate<br/>59 checks"]
+    V1 --> R["Repair<br/>fix what slipped through"]
+    R --> V2["Validate again"]
+    V2 --> E["Export<br/>CSVs in app/data/"]
 ```
 
-This step needs no database — it runs straight from the CSVs already committed in `app/data/`. Opening the repo in **GitHub Codespaces** does this automatically (see `.devcontainer/`): it installs the pinned dependencies and starts the dashboard on port 8501, opening it in a browser tab (the embedded preview is blocked by GitHub for private ports). Verified in a Codespace on 2026-10-14. The container has no database, so the pipeline, notebook 02 and the integration tests need a local MySQL/MariaDB instead.
+The generator is written to avoid contradictions up front. A validator then runs 59 consistency checks, and where something slips through, a repair step corrects the rows. Three examples show the three outcomes:
 
-The dashboard reads **only** the exported CSVs, never a live connection — this is what makes it deployable to [Streamlit Community Cloud](https://streamlit.io/cloud) as-is, since a deployed app can't reach a local database. `app/requirements.txt` is a separate, minimal requirements file (just `streamlit`/`pandas`/`plotly`) scoped to the dashboard alone — Streamlit Cloud installs from whichever `requirements.txt` sits next to the app's entry point, and the full pipeline's dependencies (SQLAlchemy, Faker, Jupyter...) have no reason to ship with the deployed app.
+- **Prevented by the generator.** `bill_before_discharge`: bills exist only for discharged stays and are dated 0 to 90 days after discharge, so the validator finds 0 violations at every size and repair has nothing to do.
+- **Fixed by repair.** `newborn_wrong_registered_date`: patients are created before their admissions exist, so a newborn's registration date cannot match the admission date when it is first drawn. At large size 70 rows violate the rule before repair and 0 after (2 and 21 at small and medium).
+- **Reported, never repaired.** The realism and clinical checks (for example, chemotherapy with no cancer diagnosis) have no repair, because fixing one would mean inventing a diagnosis or a bill. The generator is built to avoid them, and the checks confirm it did: 0 violations at every size.
 
-### Run the tests
+The data covers the last 365 days. Rooms are sized from each department's expected load and patients are placed in date order, so a room never holds more patients than it has beds and a patient is never in two beds at once. How this works, and what it costs, is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md). To run the cycle live, see notebook 02 (it overwrites the database named by `HOSPITAL_DB_URL`).
+
+## How it's checked
+
+The data is checked against 59 consistency rules in eight groups, covering dates, ages, admission types, departments, diagnoses, money, operational realism and clinical coherence. Each is a SQL query that counts violations; practice questions 15 to 18 are queries of the same kind. At all three sizes there are no violations after repair. The rules are ones I wrote, so they test internal consistency, not clinical realism. The groups are listed in [docs/METHODOLOGY.md](docs/METHODOLOGY.md#the-59-checks), together with what each round of fixes found and measured.
+
+## Dashboard
+
+**[→ Try it live](https://synthetic-hospital-db.streamlit.app/)**: no install needed. Six pages of charts you can zoom, each with a "View as table" of the numbers behind it:
+
+| Page | What it shows |
+|---|---|
+| **Overview** | Headline KPIs, admissions trend, admission-type mix, department volume, patient condition mix |
+| **Admissions & Census** | Filterable by date, department and type: admission status, length of stay, discharge disposition, triage acuity, day-of-week pattern, and bed occupancy (daily census, occupancy by room type) |
+| **Clinical** | Top diagnoses (ICD-10, the International Classification of Diseases, with readable names), diagnoses by department, top procedures and medications, test result severity |
+| **Staffing** | Headcount by department, doctor specialties, shift types, hires per year |
+| **Financials** | Revenue by payer type, payment status, billing line items, average bill by admission type, revenue trend |
+| **Data Quality** | The 59 checks and their results: violations by group before and after repair, results at each size, what the independent checks found, and every rule in plain language |
+
+Layout and colour decisions are in [docs/DASHBOARD.md](docs/DASHBOARD.md).
+
+## Tests
+
+The tests check that the data and the pipeline stay correct and repeatable: that the generated data obeys its rules, that the calculations give the right numbers, and that the same inputs give the same output. If a change breaks any of that, a test fails. A few examples:
+
+- **Rules:** no delivery on a male patient, no chemotherapy without a cancer diagnosis, no room holding more patients than it has beds, no patient in two stays at once.
+- **Reproducibility:** with the reference date pinned, two runs give identical tables and a different date gives different tables; running repair twice changes nothing.
+- **Practice set:** every solution runs, and the four data-quality solutions return no rows.
+- **Dashboard helpers:** the census calculation, and the table view built under each chart.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -m "not integration"          # unit + shipped-data tests; no database needed
+pytest -m "not integration"          # no database needed
 ```
 
-The integration test runs the whole pipeline against a real database and **regenerates it**, so it only runs when `HOSPITAL_DB_URL` is set explicitly — point it at a scratch database, never the one behind your dashboard:
+The integration tests run the whole pipeline against a real database and **regenerate it**, so they run only when `HOSPITAL_DB_URL` is set explicitly. Point it at a scratch database, never the one behind your dashboard (the schema file hard-codes the name `hospital_db`; for a scratch database, load a copy with the name replaced):
 
 ```bash
 HOSPITAL_DB_URL=mysql+pymysql://root:@localhost/hospital_scratch pytest -m integration
 ```
 
-(The schema file hard-codes the database name `hospital_db`; for a scratch database, load a copy with the name replaced.)
+The tests do not cover page layout or the live deployment. GitHub Actions runs them on every push (Python 3.11, and a MariaDB 10.4 service container for the integration tests).
 
-### Explore the notebooks
+## Notebooks
 
 ```bash
 jupyter notebook notebooks/
 ```
-- `01_eda_hospital_operations.ipynb` — exploratory analysis of the repaired dataset (admissions trends, department volume, diagnoses, length of stay, financials); reads only `app/data/`, no DB needed
-- `02_data_quality_validation.ipynb` — a **live** re-run of the generate → validate → repair cycle at small scale, capturing real before/after numbers (⚠️ truncates and regenerates the database named by `HOSPITAL_DB_URL` — see the notebook's own warning)
-- `03_sql_analysis.ipynb` — business questions in **SQL** (joins, window functions, CTEs, the polymorphic `staff_shifts` join, a data-quality rule as a query) against the shipped CSVs loaded into in-memory SQLite, so it needs no database server
 
-## Dashboard
+- `01_eda_hospital_operations.ipynb`: exploratory analysis of the dataset (admissions trends, department volume, diagnoses, length of stay, financials); reads only `app/data/`
+- `02_data_quality_validation.ipynb`: a live re-run of generate, validate, repair at small size, with real before and after numbers (⚠️ it truncates and regenerates the database named by `HOSPITAL_DB_URL`)
+- `03_sql_analysis.ipynb`: worked SQL examples (joins, window functions, CTEs, the `staff_shifts` join, a data-quality rule as a query) over the CSVs loaded into in-memory SQLite, with each answer shown
 
-**[→ Try it live](https://synthetic-hospital-db.streamlit.app/)** — no install needed.
+## Limits
 
-6 pages, each browser-verified against the shipped (synthetic) data:
+- **Everything is synthetic.** Distributions come from the generator's settings, not from real hospitals, so a finding such as "Emergency Medicine has the most admissions" describes this dataset, not the real world. The 66 diagnosis codes are real ICD-10 codes with hand-assigned weights; no real prevalence data was used.
+- **Treatments are plausible, not clinical.** Procedures, medications and tests are chosen from each admission's diagnoses and the patient's sex and age through a coarse, hand-built table. It removes hard contradictions (no chemotherapy without cancer, no delivery on a male patient); it is not clinical guidance, and an odd-but-not-contradictory pairing can still occur.
+- **Occupancy has side effects.** Keeping rooms within capacity means about 1 in 5 admissions starts when a bed frees, not at the drawn time, and a small share of patients are recorded at a lower level of care than drawn.
+- **The checks are rules I wrote**, so they cannot show that the data is realistic.
+- **The dashboard is a snapshot.** It reads the CSVs committed in `app/data/`; it changes only when the pipeline is re-run and the result is pushed.
 
-| Page | What it shows |
-|---|---|
-| **Overview** | Headline KPIs, admissions trend, admission-type mix, department volume, patient condition (acuity) mix |
-| **Admissions & Census** | Filterable by date/department/type — admission status, length-of-stay distribution, discharge disposition, triage acuity, day-of-week pattern |
-| **Clinical** | Top diagnoses (ICD-10, human-readable names), diagnoses by department, top procedures/medications, test result severity mix |
-| **Staffing** | Headcount by department (doctor/nurse/employee), doctor specialties, shift-type distribution, hires per year |
-| **Financials** | Revenue by payer type, payment status mix, billing line items by type, avg. bill by admission type, revenue trend |
-| **Data Quality** | The 57 checks and their results: violations by group before vs. after repair, results at each scale, what the independent checks found in the pre-fix data, the clinical-coherence before/after, and every rule with a plain-language description |
-
-Design notes (all in `app/utils.py`):
-- **KPI stat-tile cards** lead every page, and sit in the same position on each one — on Admissions & Census the KPI row is reserved above the filters and fills in once they're applied.
-- **Colors are assigned by category identity** (not chart-local rank or hue-cycling), with true evaluative "status" colors (e.g. payment status, discharge disposition) kept separate from plain categorical identity and from ordinal severity scales.
-- **13px minimum font** across the whole dashboard (chart axes, legends, captions, widget labels); long chart labels are wrapped onto at most two lines rather than shrunk.
-- **Every zoomable chart carries a "drag to zoom · double-click to reset" hint** (`plot()` in `app/utils.py`).
-- **Every chart has a collapsed "View as table" twin** with the numbers behind it, read from the figure itself so the two can't disagree (histograms show summary statistics). Several palette colours (aqua, yellow, magenta) are under 3:1 contrast against the chart background, which the palette validator flags as needing labels or a table view; this is the table view.
-
-## Project Structure
+## Project structure
 
 ```
 synthetic-hospital-db/
-├── README.md               # this file
-├── requirements.txt
-├── requirements-dev.txt     # + pytest
+├── README.md
+├── requirements.txt          # exact versions, tested together on Python 3.11
+├── requirements-dev.txt      # + pytest
 ├── pytest.ini
-├── LICENSE                  # MIT
-├── .gitignore
-├── .devcontainer/           # GitHub Codespaces config — installs deps and launches the dashboard
-├── .github/workflows/       # CI: unit + shipped-data tests; full pipeline against MariaDB
-├── data/                    # schema + constraint-aware generator (the "acquisition" step for synthetic data)
-│   ├── hospital_db.sql
-│   ├── hospital_generator.py
-│   ├── shared_rules.py        # constants + reference date shared by generator and validator
-│   ├── clinical_rules.py      # diagnosis -> procedures / drugs / tests, with patient eligibility
-│   └── icd10_diagnoses.py
-├── src/                     # pipeline: validation/repair, CSV export, one-command runner
-│   ├── validate_repair.py
-│   ├── export_to_csv.py
-│   └── run_pipeline.py
-├── tests/                   # unit, shipped-data and end-to-end tests
-├── notebooks/               # EDA, data-quality validation, SQL analysis (executed, real outputs)
-├── app/                     # Streamlit dashboard (self-contained, bundled CSVs in app/data/)
-└── docs/                    # schema reference, methodology, citations, validation_runs/ (recorded results)
+├── LICENSE                   # MIT
+├── .devcontainer/            # GitHub Codespaces config: installs dependencies, launches the dashboard
+├── .github/                  # CI workflow; Dependabot configuration
+├── data/                     # the generator and its rules
+│   ├── hospital_db.sql           # MySQL/MariaDB schema
+│   ├── hospital_generator.py     # builds the data
+│   ├── shared_rules.py           # constants and the reference date shared by generator and validator
+│   ├── clinical_rules.py         # diagnosis → plausible procedures, drugs and tests
+│   ├── occupancy.py              # room sizing and allocation
+│   └── icd10_diagnoses.py        # the 66 ICD-10 codes and their weights
+├── src/                      # the pipeline
+│   ├── validate_repair.py        # the 59 checks and the repairs
+│   ├── export_to_csv.py          # database → CSVs
+│   └── run_pipeline.py           # generate → validate → repair → validate → export
+├── practice/                 # SQL practice questions, solutions and a SQLite loader
+├── tests/
+├── notebooks/
+├── app/                      # the Streamlit dashboard (reads the CSVs in app/data/)
+└── docs/                     # SCHEMA, METHODOLOGY, DASHBOARD, CITATIONS, validation_runs/ (recorded results)
 ```
 
-See [docs/SCHEMA.md](docs/SCHEMA.md) for exact table/column definitions and [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for the full write-up of what was actually broken, how it was diagnosed, and how it was fixed.
-
-## Data Sources
-
-There are no external data sources — every row is synthetically generated (see [docs/CITATIONS.md](docs/CITATIONS.md) for the full disclosure and the coding standards referenced for realism). This is a deliberate design choice: healthcare data carries real privacy stakes, and a portfolio piece has no legitimate reason to touch real PHI.
-
-## Status & Limitations
-
-- **Done**: schema + constraint-aware generator, 57-check validation + repair (recorded at 3 scales), one-command pipeline, CSV export, 6-page dashboard ([deployed on Streamlit Community Cloud](https://synthetic-hospital-db.streamlit.app/)), tests, 3 executed notebooks.
-- **CI and versions**: `.github/workflows/ci.yml` runs the unit and shipped-data tests on Python 3.11 and the full pipeline against a MariaDB 10.4 service container; both jobs pass. Dependencies are pinned to exact versions (`requirements.txt`, `app/requirements.txt`), tested together on Python 3.11 — pandas 3 requires 3.11 or newer. Development before that was on Python 3.9 on one Windows machine, which the pins no longer support.
-- **Diagnosis frequencies are hand-set, not real data.** Each of the 66 ICD-10 codes has a hand-assigned relative weight (common conditions higher). No CMS/HCUP or other source was used, so "Heart failure is the most common diagnosis" is a property of the settings, not a finding.
-- **The checks measure consistency with rules I wrote, not clinical realism.** Groups 1–6 were written alongside the generator; Groups 7 and 8 were added afterwards, but they are still my idea of what "wrong" looks like. Group 8 catches six hard contradictions between a patient, their diagnoses and their treatments; the diagnosis-to-treatment mapping behind it is a coarse, hand-built table, so an odd-but-not-contradictory pairing can still occur. Ages follow a hand-set curve rather than a real population.
-- **Known residual violation**: a department with no room type suited to a patient's condition (small/medium scale). Repair downgrades the recorded condition rather than invent a room.
-- **Hospital is mostly empty**: 12,000 admissions over ~6.7 years is about 5 a day, so the census (currently admitted) is small relative to 560 rooms. That is arithmetic, not a bug, but it is not a realistic occupancy.
-- **Patient columns like SSN, phone, email and address** are included in `app/data/patients.csv`. They are Faker-generated placeholders (like everything else here), the dashboard doesn't read them, and they're kept deliberately as part of the realistic-looking schema.
-- **Reproducible when pinned**: seeds are fixed and the whole pipeline reads one reference date. Set `HOSPITAL_AS_OF` (e.g. `2026-10-13 12:00:00`) and two runs produce identical tables — tested, including that a *different* date gives different tables. Unpinned, "now" is the wall clock, so counts shift slightly between runs. Repair is deterministic and idempotent: re-running it changes nothing.
-- **Dashboard data is a static snapshot**: the deployed app reads the CSVs committed in `app/data/`, so it only changes when the pipeline is re-run and the result is pushed — there is no live database behind it.
+See [docs/CITATIONS.md](docs/CITATIONS.md) for the data disclosure: there are no external data sources, and every row is synthetic. Healthcare data carries real privacy stakes, and this project has no reason to touch real patient records.
 
 ## License
 
-MIT License — see [LICENSE](LICENSE).
+MIT License. See [LICENSE](LICENSE).
