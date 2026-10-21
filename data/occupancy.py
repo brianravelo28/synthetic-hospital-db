@@ -121,7 +121,7 @@ def allocate_rooms(rows: list, rooms: list, now, max_wait=timedelta(hours=MAX_BE
     """
     Assign a room to every admission that took place, in admission-date order.
 
-    rows   admission dicts with admission_id, department_id, admission_date,
+    rows   admission dicts with admission_id, patient_id, department_id, admission_date,
            discharge_date, admission_status, patient_condition, length_of_stay and
            _planned_days (the stay's length). Changed in place: room_id is set; if
            the patient had to wait for a bed, admission_date moves to when the bed
@@ -130,6 +130,10 @@ def allocate_rooms(rows: list, rooms: list, now, max_wait=timedelta(hours=MAX_BE
            level within max_wait is placed at a lower one.
     rooms  dicts with room_id, department_id, room_type, bed_capacity
     now    reference date: a stay not yet over (Admitted) lasts until then
+
+    A patient is never in two beds at once: a stay cannot start before the same patient's
+    previous stay ends (it moves to that time), and if the patient is still in hospital now
+    a later admission is cancelled.
 
     A room never holds more patients than it has beds. Order of preference
     (max_wait defaults to MAX_BED_WAIT_HOURS):
@@ -147,6 +151,7 @@ def allocate_rooms(rows: list, rooms: list, now, max_wait=timedelta(hours=MAX_BE
             by_dept[r['department_id']][r['room_type']].append(r['room_id'])
             beds[r['room_id']] = r['bed_capacity']
     stays = defaultdict(list)                                # room_id -> [(start, end)]
+    patient_free = {}                                        # patient_id -> when their latest stay ends
     latest = now - timedelta(minutes=5)
 
     def candidates(dept, condition):
@@ -185,12 +190,18 @@ def allocate_rooms(rows: list, rooms: list, now, max_wait=timedelta(hours=MAX_BE
                         break
         return (best[0], rng.choice(best[1])) if best else None
 
-    stats = {'placed': 0, 'waited': 0, 'wait_hours': 0.0, 'lowered': 0, 'cancelled': 0}
+    stats = {'placed': 0, 'waited': 0, 'wait_hours': 0.0, 'lowered': 0, 'cancelled': 0, 'patient_moved': 0}
     happened = [r for r in rows if r['admission_status'] in ('Admitted', 'Discharged')]
     for row in sorted(happened, key=lambda r: r['admission_date']):
         row['_open'] = row['admission_status'] == 'Admitted' or row['discharge_date'] is None
         row['_duration'] = timedelta(days=row['_planned_days'])
-        start, dept, original = row['admission_date'], row['department_id'], row['patient_condition']
+        drawn_start, dept, original = row['admission_date'], row['department_id'], row['patient_condition']
+        start = drawn_start
+        patient = row.get('patient_id')
+        busy_until = patient_free.get(patient) if patient is not None else None
+        if busy_until is not None and busy_until > start:      # the patient is still in an earlier stay
+            start = busy_until
+            stats['patient_moved'] += 1
         wait = min(max_wait, NEWBORN_MAX_WAIT) if row.get('admission_type') == 'Newborn' else max_wait   # a newborn is admitted at birth
         placed = None                                          # (time, room, condition)
 
@@ -212,16 +223,17 @@ def allocate_rooms(rows: list, rooms: list, now, max_wait=timedelta(hours=MAX_BE
             if hit:
                 placed = (hit[0], hit[1], LOWER_CARE[original][-1])
 
-        if not placed:
+        if not placed or placed[0] > latest:
             row.update(room_id=None, admission_status='Cancelled', discharge_date=None,
                        length_of_stay=None, discharge_disposition='Still Admitted')
             stats['cancelled'] += 1
             continue
 
         t, room, condition = placed
-        if t != start:                                         # waited for a bed: the stay starts then
+        if t != start:                                         # waited for a bed
             stats['waited'] += 1
             stats['wait_hours'] += (t - start).total_seconds() / 3600
+        if t != drawn_start:                                   # the stay starts later than drawn
             row['admission_date'] = t
             if not row['_open']:
                 row['discharge_date'] = t + row['_duration']
@@ -230,6 +242,8 @@ def allocate_rooms(rows: list, rooms: list, now, max_wait=timedelta(hours=MAX_BE
                                length_of_stay=None, discharge_disposition='Still Admitted')
                     row['_open'] = True
         stays[room].append((t, end_of(row, t)))
+        if patient is not None:
+            patient_free[patient] = end_of(row, t)
         row['room_id'] = room
         row['patient_condition'] = condition
         stats['placed'] += 1

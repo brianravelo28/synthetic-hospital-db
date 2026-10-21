@@ -35,8 +35,8 @@ def result(tmp_path_factory):
     return {"meta": meta, "out": out, "report": pd.read_csv(out / "report.csv")}
 
 
-def test_all_58_checks_ran(result):
-    assert result["meta"]["checks"] == len(result["report"]) == 58
+def test_all_59_checks_ran(result):
+    assert result["meta"]["checks"] == len(result["report"]) == 59
 
 
 def test_generator_prevents_admission_type_and_financial_violations(result):
@@ -73,15 +73,15 @@ def test_export_wrote_every_table_and_the_summary(result):
 # Each run is a fresh process with the same pinned reference date, because
 # the seeds are applied once at import.
 
-def _env():
-    return {**os.environ, "HOSPITAL_AS_OF": AS_OF, "PYTHONIOENCODING": "utf-8"}
+def _env(as_of=AS_OF):
+    return {**os.environ, "HOSPITAL_AS_OF": as_of, "PYTHONIOENCODING": "utf-8"}
 
 
-def _run_pipeline(tmp_path, tag):
+def _run_pipeline(tmp_path, tag, as_of=AS_OF):
     subprocess.run(
         [sys.executable, str(ROOT / "src" / "run_pipeline.py"), "--size", "small", "--no-export",
          "--report-path", str(tmp_path / f"{tag}.csv"), "--runs-summary", str(tmp_path / f"{tag}_runs.csv")],
-        check=True, env=_env(), capture_output=True, cwd=ROOT,
+        check=True, env=_env(as_of), capture_output=True, cwd=ROOT,
     )
 
 
@@ -103,6 +103,14 @@ def test_same_reference_date_gives_identical_tables(tmp_path):
     _run_pipeline(tmp_path, "b")
     second = _table_hashes()
     assert first == second
+
+
+def test_a_different_reference_date_gives_different_tables(tmp_path):
+    """The pinned date really is what drives the output: move it a month and the tables change."""
+    _run_pipeline(tmp_path, "d")
+    first = _table_hashes()
+    _run_pipeline(tmp_path, "e", as_of="2026-11-12 12:00:00")
+    assert _table_hashes() != first
 
 
 def test_repair_is_idempotent(tmp_path):
@@ -144,6 +152,13 @@ def test_no_room_is_over_capacity_and_the_check_sees_an_overlap(result):
         conn.rollback()
         assert vr.validate_realism(conn)["room_double_booked"] == 0
     assert forced >= 1
+
+
+def test_no_patient_is_in_two_stays_at_once(result):
+    from sqlalchemy import create_engine
+    import validate_repair as vr
+    with create_engine(os.environ["HOSPITAL_DB_URL"]).connect() as conn:
+        assert vr.validate_realism(conn)["patient_overlapping_admissions"] == 0
 
 
 def test_department_beds_equal_the_beds_in_its_inpatient_rooms(result):

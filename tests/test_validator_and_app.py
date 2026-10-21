@@ -24,9 +24,9 @@ def _dashboard_rule_descriptions():
     raise AssertionError("RULE_DESCRIPTIONS not found")
 
 
-def test_rule_names_are_unique_and_there_are_58():
+def test_rule_names_are_unique_and_there_are_59():
     names = _validator_rule_names()
-    assert len(names) == len(set(names)) == 58
+    assert len(names) == len(set(names)) == 59
 
 
 def test_every_rule_has_a_dashboard_description_and_vice_versa():

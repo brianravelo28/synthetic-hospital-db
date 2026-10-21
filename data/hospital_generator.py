@@ -990,7 +990,8 @@ def gen_admissions(conn, cfg: dict, patient_ids: list, dept_ids: list,
     stats = allocate_rooms(rows, rooms, now)
     mean_wait = stats['wait_hours'] / stats['waited'] if stats['waited'] else 0.0
     print(f"    rooms assigned: {stats['placed']} placed; {stats['waited']} waited for a bed (mean {mean_wait:.1f} h), "
-          f"{stats['lowered']} placed at a lower level of care, {stats['cancelled']} cancelled for lack of a bed")
+          f"{stats['lowered']} placed at a lower level of care, {stats['cancelled']} cancelled for lack of a bed; "
+          f"{stats['patient_moved']} moved to after the same patient's previous stay")
 
     execute_batch(conn, sql, [{k: v for k, v in r.items() if not k.startswith('_')} for r in rows])
     # Room status follows who is actually in the room, not a coin flip

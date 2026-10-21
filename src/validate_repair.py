@@ -973,6 +973,17 @@ def validate_realism(conn) -> dict:
                      AND b.admission_date <= a.admission_date
                      AND COALESCE(b.discharge_date, {AS_OF_SQL}) > a.admission_date) > r.bed_capacity
         """),
+        'patient_overlapping_admissions': _count(conn, f"""
+            SELECT COUNT(*) FROM admissions a
+            WHERE a.admission_status IN ('Admitted', 'Discharged')
+              AND EXISTS (
+                  SELECT 1 FROM admissions b
+                  WHERE b.patient_id = a.patient_id AND b.admission_id <> a.admission_id
+                    AND b.admission_status IN ('Admitted', 'Discharged')
+                    AND (b.admission_date < a.admission_date
+                         OR (b.admission_date = a.admission_date AND b.admission_id < a.admission_id))
+                    AND COALESCE(b.discharge_date, {AS_OF_SQL}) > a.admission_date)
+        """),
         'registered_before_birth': _count(conn, """
             SELECT COUNT(*) FROM patients WHERE registered_date < birth_date
         """),

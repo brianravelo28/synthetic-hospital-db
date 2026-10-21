@@ -1,3 +1,4 @@
 group,group_label,rule,count
 group7_realism,Group 7 — Operational Realism (detect-only),room_double_booked,5127
 group7_realism,Group 7 — Operational Realism (detect-only),census_exceeds_bed_capacity,3
+group7_realism,Group 7 — Operational Realism (detect-only),patient_overlapping_admissions,208

@@ -60,7 +60,7 @@ def test_foreign_keys_resolve(d):
 
 def test_recorded_validation_run_is_clean_apart_from_room_scarcity(d):
     r = d["report"]
-    assert len(r) == 58
+    assert len(r) == 59
     leftover = r[r["after_repair"] > 0]
     assert set(leftover["rule"]) <= {"condition_room_mismatch"}
 
@@ -233,3 +233,9 @@ def test_occupancy_is_realistic_not_empty(d):
     census = [int(((h["admission_date"] <= x) & (h["end"] > x)).sum()) for x in days[::3]]
     assert 0.45 <= (sum(census) / len(census)) / beds <= 0.85
     assert max(census) <= beds
+
+
+def test_no_patient_is_admitted_while_still_in_an_earlier_stay(d):
+    adm = _stays(d).sort_values(["patient_id", "admission_date", "admission_id"])
+    prev_end = adm.groupby("patient_id")["end"].shift()
+    assert not (prev_end > adm["admission_date"]).any()

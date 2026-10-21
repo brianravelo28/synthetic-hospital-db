@@ -186,6 +186,37 @@ def test_a_newborn_never_waits_more_than_a_day_for_a_bed():
     assert adult['room_id'] == 'R1' and adult['admission_date'] > NOW - timedelta(days=19)   # an adult just waits
 
 
+def test_a_patient_is_never_in_two_beds_at_once():
+    rooms = _rooms([("R1", "D1", "Private"), ("R2", "D1", "Private")])      # a free room is available
+    first = _row(1, "D1", NOW - timedelta(days=20), 6, 'Maximum')
+    second = _row(2, "D1", NOW - timedelta(days=18), 3, 'Maximum')
+    third = _row(3, "D1", NOW - timedelta(days=30), 2, 'Maximum')
+    for r in (first, second, third):
+        r['patient_id'] = 'PAT-1'
+    other = _row(4, "D1", NOW - timedelta(days=18), 3, 'Maximum')
+    other['patient_id'] = 'PAT-2'
+    random.seed(10)
+    stats = occ.allocate_rooms([first, second, third, other], rooms, NOW)
+    stays = sorted([(r['admission_date'], r['discharge_date']) for r in (first, second, third)])
+    for (s1, e1), (s2, _) in zip(stays, stays[1:]):
+        assert e1 <= s2                                                       # no overlap for patient 1
+    assert second['admission_date'] == first['discharge_date']               # moved to when the first stay ended
+    assert other['admission_date'] == NOW - timedelta(days=18)               # a different patient is not held back
+    assert stats['patient_moved'] == 1
+
+
+def test_a_patient_still_in_hospital_cannot_be_admitted_again():
+    rooms = _rooms([("R1", "D1", "Private"), ("R2", "D1", "Private")])
+    current = _row(1, "D1", NOW - timedelta(days=3), 10, 'Maximum')           # still admitted
+    later = _row(2, "D1", NOW - timedelta(days=1), 2, 'Maximum')
+    for r in (current, later):
+        r['patient_id'] = 'PAT-1'
+    random.seed(11)
+    occ.allocate_rooms([current, later], rooms, NOW)
+    assert current['admission_status'] == 'Admitted'
+    assert later['admission_status'] == 'Cancelled' and later['room_id'] is None
+
+
 def test_an_admission_with_no_bed_anywhere_in_time_is_cancelled_with_no_room():
     rooms = _rooms([("R1", "D1", "Private")])
     blocker = _row(1, "D1", NOW - timedelta(days=60), 45, 'Maximum')
