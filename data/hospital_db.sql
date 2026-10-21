@@ -40,7 +40,8 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- -----------------------------------------------------------------------------
 -- departments
 -- Hospital department catalog. Referenced by almost every other table.
--- bed_capacity drives hospital size configuration in the Python generators.
+-- bed_capacity is the number of inpatient beds: the generator sets it to the sum of the
+-- beds in the department's inpatient rooms (Standard, Private, ICU, NICU, Isolation).
 -- NOTE: head_doctor_id is intentionally excluded to avoid a circular
 --       dependency (doctors reference departments).
 -- -----------------------------------------------------------------------------
@@ -48,7 +49,7 @@ CREATE TABLE departments (
     department_id       VARCHAR(10)     NOT NULL,
     dep_name            VARCHAR(50)     NOT NULL,
     floor_number        TINYINT         NOT NULL,
-    bed_capacity        SMALLINT        NOT NULL        COMMENT 'Total beds in this department',
+    bed_capacity        SMALLINT        NOT NULL        COMMENT 'Inpatient beds in this department (sum of its inpatient rooms)',
 
     CONSTRAINT pk_departments       PRIMARY KEY (department_id),
     CONSTRAINT uq_dep_name          UNIQUE (dep_name),

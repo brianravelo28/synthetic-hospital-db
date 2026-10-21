@@ -63,8 +63,10 @@ from collections import defaultdict
 
 from icd10_diagnoses import sample_diagnosis
 from clinical_rules import pick_medication, pick_procedure, pick_test
+from faker.providers.date_time import change_year
+from occupancy import allocate_rooms, expected_stay_days, plan_rooms
 from shared_rules import (
-    AS_OF, CONDITION_ROOM_MAP, FEMALE_IMPOSSIBLE_CODES, MALE_IMPOSSIBLE_CODES,
+    ADMISSION_WINDOW_DAYS, AS_OF, INPATIENT_ROOM_TYPES, ROOM_BEDS, CONDITION_ROOM_MAP, FEMALE_IMPOSSIBLE_CODES, MALE_IMPOSSIBLE_CODES,
     NEWBORN_ONLY_CODES, OB_NEWBORN_DEPTS, PAYER_COVERAGE,
 )
 
@@ -87,12 +89,11 @@ fake.add_provider(person_provider)
 
 HOSPITAL_SIZES = {
     "small": {
-        "description":       "Small community hospital (~50 beds)",
+        "description":       "Small community hospital",
         "patients":           500,
         "doctors":             25,
         "nurses":              60,
         "employees":           40,
-        "rooms":               55,
         "admissions":         800,
         "avg_diagnoses":      1.5,
         "avg_procedures":     0.7,
@@ -101,12 +102,11 @@ HOSPITAL_SIZES = {
         "shifts_per_staff":   8,
     },
     "medium": {
-        "description":       "Mid-size regional hospital (~200 beds)",
+        "description":       "Mid-size regional hospital",
         "patients":          2000,
         "doctors":            100,
         "nurses":             250,
         "employees":          150,
-        "rooms":              220,
         "admissions":        3200,
         "avg_diagnoses":      1.7,
         "avg_procedures":     0.9,
@@ -115,12 +115,11 @@ HOSPITAL_SIZES = {
         "shifts_per_staff":  10,
     },
     "large": {
-        "description":       "Large academic medical center (~500+ beds)",
+        "description":       "Large academic medical center",
         "patients":          8000,
         "doctors":            350,
         "nurses":             900,
         "employees":          500,
-        "rooms":              560,
         "admissions":       12000,
         "avg_diagnoses":      2.0,
         "avg_procedures":     1.2,
@@ -135,6 +134,8 @@ HOSPITAL_SIZES = {
 # STATIC REFERENCE DATA
 # =============================================================================
 
+# bed_capacity here is a placeholder: gen_rooms() replaces it with the beds in the department's
+# inpatient rooms, so the two can't disagree.
 DEPARTMENTS_DATA = [
     {"department_id": "DEP-001", "dep_name": "Emergency Medicine",  "floor_number": 1, "bed_capacity": 20},
     {"department_id": "DEP-002", "dep_name": "Intensive Care",      "floor_number": 2, "bed_capacity": 15},
@@ -329,10 +330,12 @@ DISCHARGE_DISPOSITIONS = {
     'probs':   [0.70, 0.10, 0.10, 0.05, 0.05],
 }
 
-ROOM_TYPES  = ['Standard', 'Private', 'ICU', 'NICU', 'OR', 'ER', 'Recovery', 'Isolation']
-ROOM_TYPE_P = [0.35, 0.20, 0.15, 0.05, 0.10, 0.05, 0.05, 0.05]
+ROOM_TYPES  = list(ROOM_BEDS)          # room types and their beds: see shared_rules.py
 
 SHIFT_TYPES = ['Morning', 'Afternoon', 'Night']
+
+CONDITIONS  = ['Minimal', 'Moderate', 'Maximum', 'Intensive']
+CONDITION_P = [0.15, 0.40, 0.30, 0.15]
 
 CHIEF_COMPLAINTS = [
     'Chest pain', 'Shortness of breath', 'Abdominal pain', 'Fever',
@@ -369,6 +372,19 @@ NON_NEWBORN_TYPE_P   = list(_non_newborn_p_raw / _non_newborn_p_raw.sum())
 
 def gen_id(prefix: str) -> str:
     return f"{prefix}-{fake.unique.random_int(min=100000, max=999999)}"
+
+
+def date_of_birth(minimum_age: int, maximum_age: int) -> date:
+    """
+    Faker's date_of_birth(), but measured from the pinned reference date AS_OF. Faker reads
+    the system clock internally, so with HOSPITAL_AS_OF pinned the staff birth dates (and the
+    hire dates derived from them) still moved with the real date.
+    """
+    now   = AS_OF.date()
+    start = change_year(now, -(maximum_age + 1))
+    end   = change_year(now, -minimum_age)
+    dob   = fake.date_time_ad(start_datetime=start, end_datetime=end).date()
+    return dob if dob != start else dob + timedelta(days=1)
 
 
 def random_date_between(start: date, end: date) -> date:
@@ -643,11 +659,11 @@ def gen_doctors(conn, cfg: dict, dept_ids: list) -> list:
     rows       = []
     doctor_ids = []
     hire_start = date(2000, 1, 1)
-    window_open = date(2019, 12, 31)       # admissions start 2020-01-01
+    window_open = date(2019, 12, 31)       # guarantee: every department has someone hired well before the admission window
 
     def make_doctor(specialty, dept_id, early=False):
         gender = np.random.choice(['M', 'F', 'NB'], p=[0.55, 0.42, 0.03])
-        birth  = fake.date_of_birth(minimum_age=45 if early else 28, maximum_age=70)
+        birth  = date_of_birth(45 if early else 28, 70)
         return {
             "doctor_id":     gen_id("DOC"),
             "first_name":    gender_name(gender),
@@ -713,7 +729,7 @@ def gen_nurses(conn, cfg: dict, dept_ids: list) -> list:
         position     = random.choice(NURSE_POSITIONS)
         dept_options = NURSE_POSITION_TO_DEPARTMENT.get(position)
         dept_id      = random.choice(dept_options if dept_options else dept_ids)
-        birth        = fake.date_of_birth(minimum_age=22, maximum_age=65)
+        birth        = date_of_birth(22, 65)
 
         rows.append({
             "nurse_id":      nid,
@@ -785,66 +801,67 @@ def gen_employees(conn, cfg: dict, dept_ids: list) -> list:
     return employee_ids
 
 
-def gen_rooms(conn, cfg: dict, dept_ids: list) -> list:
-    print(f"  Generating {cfg['rooms']} rooms...")
+def _dept_load_shares(dept_ids: list) -> dict:
+    """
+    Share of admissions each department receives, from how gen_admissions routes
+    patients by age: newborns to OB/GYN and Pediatrics, children to Pediatrics,
+    Emergency and Intensive Care, adults across every department but Pediatrics.
+    """
+    newborn  = sum(w for lo, hi, w in AGE_BANDS if hi == 0)
+    children = sum(w for lo, hi, w in AGE_BANDS if lo >= 1 and hi <= 17)
+    adults   = 1.0 - newborn - children
+    adult_pool = [d for d in dept_ids if d != 'DEP-008']
+    shares = {d: 0.0 for d in dept_ids}
+    for pool, weight in ((NEWBORN_DEPT_POOL, newborn), (PEDIATRIC_DEPT_POOL, children), (adult_pool, adults)):
+        for d in pool:
+            shares[d] += weight / len(pool)
+    return shares
+
+
+def gen_rooms(conn, cfg: dict, dept_ids: list, size: str) -> list:
+    """
+    Create the rooms, sized from each department's expected patient load and the
+    planned occupancy by room type (occupancy.plan_rooms), then set each
+    department's bed_capacity to the beds in its inpatient rooms.
+    """
     sql = """INSERT INTO rooms
              (room_id, room_number, room_type, floor_number, bed_capacity,
               department_id, status)
              VALUES (:room_id, :room_number, :room_type, :floor_number, :bed_capacity,
                      :department_id, :status)"""
 
-    bed_capacity_map = {
-        'Standard': 2, 'Private': 1, 'ICU': 1, 'NICU': 1,
-        'OR': 1, 'ER': 2, 'Recovery': 2, 'Isolation': 1
-    }
-
-    rows         = []
-    room_ids     = []
-    room_numbers = random.sample(range(100, 999), min(cfg['rooms'], 899))
-
-    for i in range(cfg['rooms']):
-        rid       = gen_id("RMN")
-        room_type = np.random.choice(ROOM_TYPES, p=ROOM_TYPE_P)
-        dept_id   = random.choice(dept_ids)
-        dept_obj  = next((d for d in DEPARTMENTS_DATA if d["department_id"] == dept_id), None)
-        floor_num = dept_obj["floor_number"] if dept_obj else random.randint(1, 6)
-
-        rows.append({
-            "room_id":       rid,
-            "room_number":   str(room_numbers[i]),
-            "room_type":     room_type,
-            "floor_number":  floor_num,
-            "bed_capacity":  bed_capacity_map.get(room_type, 1),
-            "department_id": dept_id,
-            "status":        np.random.choice(
-                                 ['Available', 'Occupied', 'Maintenance'],
-                                 p=[0.50, 0.42, 0.08]
-                             ),
-        })
-        room_ids.append(rid)
-
-    # ── Guarantee at least one room per department ────────────────────────
-    assigned_depts = {r["department_id"] for r in rows}
-    missing_depts  = [d for d in dept_ids if d not in assigned_depts]
-
-    for dept_id in missing_depts:
-        dept_obj  = next((d for d in DEPARTMENTS_DATA if d["department_id"] == dept_id), None)
-        floor_num = dept_obj["floor_number"] if dept_obj else 1
-        rid       = gen_id("RMN")
-        rows.append({
-            "room_id":       rid,
-            "room_number":   str(random.randint(100, 999)),
-            "room_type":     "Standard",
-            "floor_number":  floor_num,
-            "bed_capacity":  2,
-            "department_id": dept_id,
-            "status":        "Available",
-        })
-        room_ids.append(rid)
-        print(f"    Guaranteed room added for {dept_id}")
+    plan = plan_rooms(
+        _dept_load_shares(dept_ids), cfg['admissions'], ADMISSION_CATEGORY_P[ADMISSION_CATEGORIES.index('Completed')],
+        CONDITION_P, expected_stay_days(MAX_STAY_DAYS), size,
+    )
+    n_rooms = sum(count for _, _, count in plan)
+    print(f"  Generating {n_rooms} rooms...")
+    floors       = {d["department_id"]: d["floor_number"] for d in DEPARTMENTS_DATA}
+    room_numbers = random.sample(range(100, 999), min(n_rooms, 899))
+    rows, room_ids = [], []
+    for dept_id, room_type, count in plan:
+        for _ in range(count):
+            rid = gen_id("RMN")
+            rows.append({
+                "room_id":       rid,
+                "room_number":   str(room_numbers[len(rows)]),
+                "room_type":     room_type,
+                "floor_number":  floors.get(dept_id, 1),
+                "bed_capacity":  ROOM_BEDS[room_type],
+                "department_id": dept_id,
+                "status":        "Available",          # set from who is actually in the room, after admissions
+            })
+            room_ids.append(rid)
 
     execute_batch(conn, sql, rows)
-    print(f"    {len(room_ids)} rooms inserted")
+    inpatient = ", ".join(f"'{t}'" for t in INPATIENT_ROOM_TYPES)
+    conn.execute(text(f"""
+        UPDATE departments d
+        SET d.bed_capacity = (SELECT COALESCE(SUM(r.bed_capacity), 0) FROM rooms r
+                              WHERE r.department_id = d.department_id AND r.room_type IN ({inpatient}))
+    """))
+    beds = conn.execute(text(f"SELECT COALESCE(SUM(bed_capacity), 0) FROM rooms WHERE room_type IN ({inpatient})")).scalar()
+    print(f"    {len(room_ids)} rooms inserted; {int(beds)} inpatient beds")
     return room_ids
 
 
@@ -872,19 +889,11 @@ def gen_admissions(conn, cfg: dict, patient_ids: list, dept_ids: list,
                      :admission_status, :discharge_disposition, :patient_condition,
                      :length_of_stay)"""
 
-    # Build dept -> room and dept -> room_type -> room lookups
-    result = conn.execute(text("SELECT room_id, department_id, room_type FROM rooms ORDER BY room_id"))
-    dept_room_map      = defaultdict(list)
-    dept_room_type_map = defaultdict(lambda: defaultdict(list))
-    for row in result:
-        dept_room_map[row[1]].append(row[0])
-        dept_room_type_map[row[1]][row[2]].append(row[0])
-
     # Adult pool excludes Pediatrics so adults never land in DEP-008
     adult_dept_pool = [d for d in dept_ids if d != 'DEP-008']
 
-    adm_start    = datetime(2020, 1, 1)
     now          = AS_OF
+    adm_start    = now - timedelta(days=ADMISSION_WINDOW_DAYS)
     latest_past  = now - timedelta(minutes=5)
     newborn_done = set()
     rows         = []
@@ -934,19 +943,18 @@ def gen_admissions(conn, cfg: dict, patient_ids: list, dept_ids: list,
         if category != 'Scheduled' and adm_dt > latest_past:
             adm_dt = latest_past
 
-        condition = np.random.choice(
-                        ['Minimal', 'Moderate', 'Maximum', 'Intensive'],
-                        p=[0.15, 0.40, 0.30, 0.15]
-                    )
+        condition = np.random.choice(CONDITIONS, p=CONDITION_P)
 
         # Status follows from the dates
         los, dis_dt, dis_dsp = None, None, 'Still Admitted'
+        planned_days = 0
         if category == 'Scheduled':
             status = 'Scheduled'
         elif category == 'Cancelled':
             status = 'Cancelled'
         else:
             los    = min(max(1, int(np.random.exponential(scale=5))), MAX_STAY_DAYS)
+            planned_days = los
             dis_dt = adm_dt + timedelta(days=los)
             if dis_dt > now:                   # stay hasn't ended yet
                 status, los, dis_dt = 'Admitted', None, None
@@ -957,23 +965,12 @@ def gen_admissions(conn, cfg: dict, patient_ids: list, dept_ids: list,
                               p=DISCHARGE_DISPOSITIONS['probs']
                           )
 
-        # Room matched to admission department AND patient_condition
-        dept_rooms = dept_room_map.get(dept_id, [])
-        room_id    = None
-        if status in ['Admitted', 'Discharged'] and dept_rooms:
-            allowed_types = CONDITION_ROOM_MAP.get(condition, [])
-            candidates = [
-                rid for rt in allowed_types
-                for rid in dept_room_type_map.get(dept_id, {}).get(rt, [])
-            ]
-            room_id = random.choice(candidates) if candidates else random.choice(dept_rooms)
-
         rows.append({
             "admission_id":          aid,
             "patient_id":            patient_id,
             "admitting_doctor_id":   doc_id,
             "department_id":         dept_id,
-            "room_id":               room_id,
+            "room_id":               None,            # assigned below, once every date is known
             "admission_date":        adm_dt,
             "discharge_date":        dis_dt,
             "admission_type":        adm_type,
@@ -981,10 +978,29 @@ def gen_admissions(conn, cfg: dict, patient_ids: list, dept_ids: list,
             "discharge_disposition": dis_dsp,
             "patient_condition":     condition,
             "length_of_stay":        los,
+            "_planned_days":         planned_days,   # used by room allocation, not stored
         })
         adm_ids.append(aid)
 
-    execute_batch(conn, sql, rows)
+    # Rooms go in last, in admission-date order, so a room never holds more patients
+    # than it has beds (occupancy.allocate_rooms).
+    rooms = [{"room_id": r[0], "department_id": r[1], "room_type": r[2], "bed_capacity": r[3]}
+             for r in conn.execute(text(
+                 "SELECT room_id, department_id, room_type, bed_capacity FROM rooms ORDER BY room_id"))]
+    stats = allocate_rooms(rows, rooms, now)
+    mean_wait = stats['wait_hours'] / stats['waited'] if stats['waited'] else 0.0
+    print(f"    rooms assigned: {stats['placed']} placed; {stats['waited']} waited for a bed (mean {mean_wait:.1f} h), "
+          f"{stats['lowered']} placed at a lower level of care, {stats['cancelled']} cancelled for lack of a bed")
+
+    execute_batch(conn, sql, [{k: v for k, v in r.items() if not k.startswith('_')} for r in rows])
+    # Room status follows who is actually in the room, not a coin flip
+    conn.execute(text("""
+        UPDATE rooms r
+        SET r.status = CASE
+            WHEN EXISTS (SELECT 1 FROM admissions a WHERE a.room_id = r.room_id AND a.admission_status = 'Admitted') THEN 'Occupied'
+            WHEN MOD(CRC32(r.room_id), 20) = 0 THEN 'Maintenance'
+            ELSE 'Available' END
+    """))
     print(f"    {len(adm_ids)} admissions inserted")
     return adm_ids
 
@@ -1488,7 +1504,7 @@ def main(size: str = "medium"):
         doctor_ids   = gen_doctors(conn, cfg, dept_ids)
         nurse_ids    = gen_nurses(conn, cfg, dept_ids)
         employee_ids = gen_employees(conn, cfg, dept_ids)
-        room_ids     = gen_rooms(conn, cfg, dept_ids)
+        room_ids     = gen_rooms(conn, cfg, dept_ids, size)
         conn.commit()
 
         patient_info = _load_patient_info(conn)

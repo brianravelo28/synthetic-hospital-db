@@ -65,6 +65,7 @@ RULE_DESCRIPTIONS = {
     "stale_admitted_over_60d": "Patient still 'admitted' 60+ days after admission",
     "scheduled_in_past": "A 'scheduled' admission dated in the past",
     "admission_before_birth": "Admission dated before the patient was born",
+    "room_double_booked": "A room holding more patients at once than it has beds",
     "registered_before_birth": "Patient registered before they were born",
     "registered_in_future": "Patient registration date is in the future",
     "bill_before_admission": "Bill dated before the admission began",

@@ -35,8 +35,8 @@ def result(tmp_path_factory):
     return {"meta": meta, "out": out, "report": pd.read_csv(out / "report.csv")}
 
 
-def test_all_57_checks_ran(result):
-    assert result["meta"]["checks"] == len(result["report"]) == 57
+def test_all_58_checks_ran(result):
+    assert result["meta"]["checks"] == len(result["report"]) == 58
 
 
 def test_generator_prevents_admission_type_and_financial_violations(result):
@@ -117,3 +117,42 @@ def test_repair_is_idempotent(tmp_path):
         check=True, env=_env(), capture_output=True, cwd=ROOT,
     )
     assert _table_hashes() == before
+
+
+# ── occupancy ─────────────────────────────────────────────────────────────
+
+def test_no_room_is_over_capacity_and_the_check_sees_an_overlap(result):
+    """room_double_booked is 0 on generated data, and fires when two stays are forced into one bed."""
+    from sqlalchemy import create_engine, text
+    import validate_repair as vr
+    engine = create_engine(os.environ["HOSPITAL_DB_URL"])
+    with engine.connect() as conn:
+        assert vr.validate_realism(conn)["room_double_booked"] == 0
+        beds1 = conn.execute(text("""
+            SELECT a.admission_id, a.room_id, a.admission_date, a.discharge_date FROM admissions a
+            JOIN rooms r ON r.room_id = a.room_id AND r.bed_capacity = 1
+            WHERE a.admission_status = 'Discharged' ORDER BY a.admission_id LIMIT 1""")).first()
+        other = conn.execute(text("""
+            SELECT admission_id FROM admissions
+            WHERE admission_status = 'Discharged' AND admission_id <> :a ORDER BY admission_id LIMIT 1"""),
+                             {"a": beds1[0]}).scalar()
+        # put a second stay into the same one-bed room over exactly the same dates, then undo it
+        conn.execute(text("""UPDATE admissions SET room_id = :room, admission_date = :s, discharge_date = :e
+                             WHERE admission_id = :other"""),
+                     {"room": beds1[1], "s": beds1[2], "e": beds1[3], "other": other})
+        forced = vr.validate_realism(conn)["room_double_booked"]
+        conn.rollback()
+        assert vr.validate_realism(conn)["room_double_booked"] == 0
+    assert forced >= 1
+
+
+def test_department_beds_equal_the_beds_in_its_inpatient_rooms(result):
+    from sqlalchemy import create_engine, text
+    engine = create_engine(os.environ["HOSPITAL_DB_URL"])
+    with engine.connect() as conn:
+        bad = conn.execute(text("""
+            SELECT COUNT(*) FROM departments d
+            WHERE d.bed_capacity <> (SELECT COALESCE(SUM(r.bed_capacity), 0) FROM rooms r
+                                     WHERE r.department_id = d.department_id
+                                       AND r.room_type IN ('Standard','Private','ICU','NICU','Isolation'))""")).scalar()
+    assert bad == 0

@@ -34,6 +34,8 @@ def d():
         "pp": load("patient_procedures"),
         "procedures": load("procedures"),
         "meds": load("medications"),
+        "rooms": load("rooms"),
+        "departments": load("departments"),
         "tests": load("medical_tests"),
         "dx": load("diagnoses", ["diagnosis_date"]),
         "doctors": load("doctors", ["hire_date", "birth_date"]),
@@ -58,7 +60,7 @@ def test_foreign_keys_resolve(d):
 
 def test_recorded_validation_run_is_clean_apart_from_room_scarcity(d):
     r = d["report"]
-    assert len(r) == 57
+    assert len(r) == 58
     leftover = r[r["after_repair"] > 0]
     assert set(leftover["rule"]) <= {"condition_room_mismatch"}
 
@@ -67,7 +69,9 @@ def test_census_is_small_and_recent(d):
     adm = d["admissions"]
     current = adm[adm["admission_status"] == "Admitted"]
     assert (current["admission_date"] >= d["generated_at"] - pd.Timedelta(days=60)).all()
-    assert current.groupby("department_id").size().max() <= 30      # biggest department's beds
+    beds = d["departments"].set_index("department_id")["bed_capacity"]
+    per_dept = current.groupby("department_id").size()
+    assert (per_dept <= beds.reindex(per_dept.index)).all()          # nobody over their department's beds
 
 
 def test_scheduled_admissions_are_in_the_future(d):
@@ -180,3 +184,52 @@ def test_pap_smears_only_for_women_21_and_over(d):
         _age_at_admission(d["admissions"], d["patients"]), on="admission_id")
     assert len(paps) > 0
     assert (paps["gender"] == "F").all() and (paps["age_at_adm"] >= 21).all()
+
+
+# ── occupancy ─────────────────────────────────────────────────────────────
+
+INPATIENT = ["Standard", "Private", "ICU", "NICU", "Isolation"]
+
+
+def _stays(d):
+    adm = d["admissions"]
+    h = adm[adm["admission_status"].isin(["Admitted", "Discharged"])].merge(
+        d["rooms"][["room_id", "room_type", "bed_capacity"]], on="room_id")
+    h["end"] = h["discharge_date"].fillna(d["generated_at"])
+    return h
+
+
+def test_admissions_cover_about_one_year(d):
+    adm = d["admissions"]
+    past = adm[adm["admission_status"].isin(["Admitted", "Discharged", "Cancelled"])]
+    assert (d["generated_at"] - past["admission_date"].min()).days <= 367
+
+
+def test_no_room_holds_more_patients_than_it_has_beds(d):
+    h = _stays(d)
+    for room_id, g in h.groupby("room_id"):
+        beds = g["bed_capacity"].iloc[0]
+        for start in g["admission_date"]:
+            assert ((g["admission_date"] <= start) & (g["end"] > start)).sum() <= beds, room_id
+
+
+def test_department_beds_equal_the_beds_in_its_inpatient_rooms(d):
+    rooms = d["rooms"][d["rooms"]["room_type"].isin(INPATIENT)]
+    beds = rooms.groupby("department_id")["bed_capacity"].sum()
+    dep = d["departments"].set_index("department_id")["bed_capacity"]
+    assert (dep == beds.reindex(dep.index)).all()
+
+
+def test_procedure_rooms_never_hold_an_admission(d):
+    assert not _stays(d)["room_type"].isin(["OR", "ER", "Recovery"]).any()
+
+
+def test_occupancy_is_realistic_not_empty(d):
+    """Average bed occupancy after the first 45 days is far above the old ~6%, and never above 100%."""
+    h = _stays(d)
+    beds = d["rooms"][d["rooms"]["room_type"].isin(INPATIENT)]["bed_capacity"].sum()
+    first = h["admission_date"].min().normalize()
+    days = pd.date_range(first + pd.Timedelta(days=45), d["generated_at"].normalize(), freq="D")
+    census = [int(((h["admission_date"] <= x) & (h["end"] > x)).sum()) for x in days[::3]]
+    assert 0.45 <= (sum(census) / len(census)) / beds <= 0.85
+    assert max(census) <= beds

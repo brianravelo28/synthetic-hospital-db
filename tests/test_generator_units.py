@@ -131,6 +131,18 @@ def test_no_raw_clock_or_sql_randomness_left_in_the_pipeline():
         assert not re.search(r"datetime\.now\(\)|date\.today\(\)|NOW\(\)|CURDATE\(\)|RAND\(\)", text), path
 
 
+def test_staff_birth_dates_follow_the_pinned_reference_date_not_the_wall_clock(monkeypatch):
+    """Faker's own date_of_birth() reads datetime.now(), which made pinned runs drift day to day."""
+    src = open(gen.__file__, encoding="utf-8").read()
+    assert "fake.date_of_birth" not in src
+    for as_of in (datetime(2026, 10, 13, 12), datetime(2031, 3, 1, 9)):
+        monkeypatch.setattr(gen, "AS_OF", as_of)
+        for _ in range(300):
+            born = gen.date_of_birth(28, 70)
+            age = (as_of.date() - born).days / 365.25
+            assert 28 <= age < 71
+
+
 def test_every_room_type_has_a_billing_rate():
     assert set(gen.ROOM_RATES) == set(gen.ROOM_TYPES)
 

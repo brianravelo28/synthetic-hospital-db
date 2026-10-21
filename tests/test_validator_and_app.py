@@ -24,9 +24,9 @@ def _dashboard_rule_descriptions():
     raise AssertionError("RULE_DESCRIPTIONS not found")
 
 
-def test_rule_names_are_unique_and_there_are_57():
+def test_rule_names_are_unique_and_there_are_58():
     names = _validator_rule_names()
-    assert len(names) == len(set(names)) == 57
+    assert len(names) == len(set(names)) == 58
 
 
 def test_every_rule_has_a_dashboard_description_and_vice_versa():
@@ -141,3 +141,41 @@ def test_chart_table_colour_that_repeats_the_category_does_not_pivot(app_utils):
     df = pd.DataFrame({"type": ["Doctor", "Nurse"], "hours": [10, 20]})
     t = app_utils.chart_table(px.bar(df, x="type", y="hours", color="type"))
     assert t.values.tolist() == [["Doctor", 10], ["Nurse", 20]]       # no None-filled diagonal
+
+
+# ── occupancy maths used by the dashboard ────────────────────────────────
+
+def test_daily_census_counts_a_stay_on_each_midnight_it_spans(app_utils):
+    import pandas as pd
+    rooms = pd.DataFrame({"room_id": ["R1", "R2"], "room_type": ["Standard", "OR"], "bed_capacity": [2, 1]})
+    adm = pd.DataFrame({
+        "admission_status": ["Discharged", "Admitted", "Cancelled", "Discharged"],
+        "room_id": ["R1", "R1", None, "R2"],                       # the OR room never counts as a bed
+        "admission_date": pd.to_datetime(["2026-01-01 10:00", "2026-01-02 09:00", "2026-01-01 08:00", "2026-01-01 10:00"]),
+        "discharge_date": pd.to_datetime(["2026-01-03 08:00", None, None, "2026-01-02 08:00"]),
+    })
+    c = app_utils.daily_census(adm, rooms, pd.Timestamp("2026-01-04 12:00"))
+    # stay A is in a bed at midnight on Jan 2 and Jan 3; stay B (still admitted) from Jan 3 on
+    assert c.index.strftime("%m-%d").tolist() == ["01-01", "01-02", "01-03", "01-04"]
+    assert c["Standard"].tolist() == [0, 1, 2, 1]
+    assert "OR" not in c.columns
+
+
+def test_inpatient_beds_exclude_procedure_rooms(app_utils):
+    import pandas as pd
+    rooms = pd.DataFrame({"room_type": ["Standard", "Standard", "ICU", "OR", "ER", "Recovery"],
+                          "bed_capacity": [2, 2, 1, 1, 2, 2]})
+    beds = app_utils.inpatient_beds(rooms)
+    assert beds["Standard"] == 4 and beds["ICU"] == 1 and beds.sum() == 5
+
+
+# ── newborn repair never puts a birth date after another admission ──────
+
+def test_newborn_birth_date_is_within_three_days_and_not_after_an_earlier_admission():
+    from datetime import date
+    adm = date(2026, 10, 13)
+    for pid in ("PAT-100001", "PAT-555555", "PAT-999999", "PAT-123456"):
+        born = vr.newborn_birth_date(pid, adm, adm)                       # newborn admission is the first admission
+        assert 0 <= (adm - born).days <= 3
+        assert vr.newborn_birth_date(pid, adm, date(2026, 10, 12)) <= date(2026, 10, 12)
+    assert vr.newborn_birth_date("PAT-100001", adm, adm) == vr.newborn_birth_date("PAT-100001", adm, adm)   # repeatable

@@ -12,6 +12,7 @@ import json
 import textwrap
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -241,6 +242,44 @@ def load_validation() -> dict:
         "baseline": pd.read_csv(DATA_DIR / "validation_baseline_pre_fix.csv"),
         "baseline_clinical": pd.read_csv(DATA_DIR / "validation_baseline_pre_coherence.csv"),
     }
+
+
+# ── Occupancy ───────────────────────────────────────────────────────────────
+# Inpatient beds exclude OR, ER and Recovery rooms (procedure and visit spaces).
+INPATIENT_ROOM_TYPES = ["Standard", "Private", "ICU", "NICU", "Isolation"]
+OCCUPANCY_WARMUP_DAYS = 45      # the hospital starts empty, so the first stretch is left out of averages
+
+
+def daily_census(admissions: pd.DataFrame, rooms: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFrame:
+    """
+    Patients in an inpatient bed at midnight, by room type: one row per day, one column
+    per inpatient room type. A stay is counted on every midnight from its admission up to
+    (not including) the midnight on or after it ends; a stay still under way lasts to as_of.
+    """
+    stays = admissions[admissions["admission_status"].isin(["Admitted", "Discharged"]) & admissions["room_id"].notna()]
+    stays = stays.merge(rooms[["room_id", "room_type"]], on="room_id")
+    stays = stays[stays["room_type"].isin(INPATIENT_ROOM_TYPES)]
+    if stays.empty:
+        return pd.DataFrame(columns=INPATIENT_ROOM_TYPES, dtype=float)
+    first = stays["admission_date"].min().normalize()
+    days = pd.date_range(first, pd.Timestamp(as_of).normalize(), freq="D")
+    one_day = pd.Timedelta(days=1)
+    start = np.ceil(((stays["admission_date"] - first) / one_day).to_numpy()).astype(int)
+    end = np.ceil(((stays["discharge_date"].fillna(pd.Timestamp(as_of)) - first) / one_day).to_numpy()).astype(int)
+    out = {}
+    for room_type in INPATIENT_ROOM_TYPES:
+        pick = (stays["room_type"] == room_type).to_numpy()
+        change = np.zeros(len(days) + 1)
+        np.add.at(change, np.clip(start[pick], 0, len(days)), 1)
+        np.add.at(change, np.clip(end[pick], 0, len(days)), -1)
+        out[room_type] = np.cumsum(change)[: len(days)]
+    return pd.DataFrame(out, index=days)
+
+
+def inpatient_beds(rooms: pd.DataFrame) -> pd.Series:
+    """Beds by inpatient room type."""
+    inpatient = rooms[rooms["room_type"].isin(INPATIENT_ROOM_TYPES)]
+    return inpatient.groupby("room_type")["bed_capacity"].sum().reindex(INPATIENT_ROOM_TYPES).fillna(0)
 
 
 # ── Formatting helpers ──────────────────────────────────────────────────────

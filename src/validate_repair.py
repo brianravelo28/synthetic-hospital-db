@@ -100,6 +100,14 @@ def get_dept_doctor_map(conn) -> dict:
     return dict(m)
 
 
+def newborn_birth_date(patient_id: str, adm_date: date, first_adm: date) -> date:
+    """
+    Birth date for a newborn admitted on adm_date: up to three days earlier (chosen from a hash of the
+    patient id, so it is repeatable), but never later than the patient's earliest admission of any kind.
+    """
+    return min(adm_date - timedelta(days=zlib.crc32(patient_id.encode()) % 4), first_adm)
+
+
 def get_dept_room_map(conn, room_types: list = None) -> dict:
     """
     Return {department_id: [room_ids]} optionally filtered by room_type list.
@@ -410,21 +418,24 @@ def repair_age(conn):
     # ── Newborn birth_date, age, registered_date (only where inconsistent) ──
     result = conn.execute(text("""
         SELECT DISTINCT p.patient_id, DATE(a.admission_date) AS adm_date,
-               p.age, p.birth_date, p.registered_date
+               p.age, p.birth_date, p.registered_date,
+               (SELECT MIN(DATE(x.admission_date)) FROM admissions x WHERE x.patient_id = p.patient_id) AS first_adm
         FROM patients p
         JOIN admissions a ON p.patient_id = a.patient_id
         WHERE a.admission_type = 'Newborn'
     """))
     updates = []
-    for pid, adm_date, age, birth, registered in result.fetchall():
+    for pid, adm_date, age, birth, registered, first_adm in result.fetchall():
         adm_date   = date.fromisoformat(adm_date)   if isinstance(adm_date, str)   else adm_date
         birth      = date.fromisoformat(birth)      if isinstance(birth, str)      else birth
         registered = date.fromisoformat(registered) if isinstance(registered, str) else registered
-        if age == 0 and registered == adm_date and adm_date - timedelta(days=3) <= birth <= adm_date:
+        first_adm  = date.fromisoformat(first_adm)  if isinstance(first_adm, str)  else first_adm
+        if (age == 0 and registered == adm_date and birth <= first_adm
+                and birth >= min(adm_date - timedelta(days=3), first_adm)):
             continue                                  # already consistent
         updates.append({
             "patient_id":      pid,
-            "birth_date":      adm_date - timedelta(days=zlib.crc32(pid.encode()) % 4),
+            "birth_date":      newborn_birth_date(pid, adm_date, first_adm),
             "age":             0,
             "registered_date": adm_date,
         })
@@ -953,6 +964,14 @@ def validate_realism(conn) -> dict:
             SELECT COUNT(*) FROM admissions a
             JOIN patients p ON p.patient_id = a.patient_id
             WHERE DATE(a.admission_date) < p.birth_date
+        """),
+        'room_double_booked': _count(conn, f"""
+            SELECT COUNT(*) FROM admissions a
+            JOIN rooms r ON r.room_id = a.room_id
+            WHERE (SELECT COUNT(*) FROM admissions b
+                   WHERE b.room_id = a.room_id
+                     AND b.admission_date <= a.admission_date
+                     AND COALESCE(b.discharge_date, {AS_OF_SQL}) > a.admission_date) > r.bed_capacity
         """),
         'registered_before_birth': _count(conn, """
             SELECT COUNT(*) FROM patients WHERE registered_date < birth_date
