@@ -126,9 +126,9 @@ st.markdown(
     "The generator is built to avoid violations in the first place; a repair step then fixes whatever "
     "slips through. **Before repair** is what the generator itself produced; **after repair** is what "
     "is left in the dataset behind this dashboard. Groups 1–6 were written alongside the generator. "
-    "**Groups 7 and 8 were added afterwards and deliberately not designed around** — they only report, "
-    "because repairing e.g. a bill line that points at the wrong patient's procedure would mean "
-    "inventing data."
+    "**Groups 7 and 8 were added afterwards, written without reference to the generator, which was then "
+    "fixed until they passed.** They only report, because repairing e.g. a bill line that points at the "
+    "wrong patient's procedure would mean inventing data."
 )
 st.divider()
 
