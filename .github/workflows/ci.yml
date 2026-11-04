@@ -9,8 +9,8 @@ jobs:
     name: Unit + shipped-data tests (no database)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -18,11 +18,17 @@ jobs:
       - run: pytest -m "not integration" -q
 
   integration:
-    name: Full pipeline against MariaDB
+    name: Full pipeline against MariaDB ${{ matrix.mariadb }}
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # 10.4 is what the project was developed on (XAMPP) and is past end of life (June 2024);
+        # 10.11 is a supported long-term release.
+        mariadb: ["10.4", "10.11"]
     services:
       mariadb:
-        image: mariadb:10.4          # the version the project was developed on (XAMPP)
+        image: mariadb:${{ matrix.mariadb }}
         env:
           MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "1"
           MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
@@ -36,8 +42,8 @@ jobs:
     env:
       HOSPITAL_DB_URL: mysql+pymysql://root:@127.0.0.1:3306/hospital_db
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip

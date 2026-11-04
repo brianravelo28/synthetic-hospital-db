@@ -3,14 +3,14 @@
 # `pytest` and the dashboard.
 
 # Data generation & pipeline (data/, src/)
-sqlalchemy==2.1.4
+sqlalchemy==2.1.7
 pymysql==1.2.3
 faker==40.43.0
 numpy==2.4.6
-pandas==3.0.6
+pandas==3.1.0
 
 # Dashboard (app/)
-streamlit==1.65.0
+streamlit==1.66.1
 plotly==7.1.0
 
 # Notebooks (notebooks/)

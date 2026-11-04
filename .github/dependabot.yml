@@ -1,15 +1,26 @@
-# Opens a pull request when a pinned dependency or a GitHub Action has a newer version.
+# Opens pull requests when a pinned dependency or a GitHub Action has a newer version.
+# Updates are grouped so the root and app/ requirements files move together.
 version: 2
 updates:
   - package-ecosystem: "pip"
-    directory: "/"
+    directories:
+      - "/"
+      - "/app"
     schedule:
       interval: "weekly"
-  - package-ecosystem: "pip"
-    directory: "/app"
-    schedule:
-      interval: "weekly"
+    groups:
+      python-dependencies:
+        patterns:
+          - "*"
+    ignore:
+      # NumPy 2.5 and later need Python 3.12 or newer; this project runs on Python 3.11.
+      - dependency-name: "numpy"
+        versions: [">=2.5"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
