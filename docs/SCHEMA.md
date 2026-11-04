@@ -52,7 +52,7 @@ erDiagram
 
 | Table | Key columns | Notes |
 |---|---|---|
-| `patients` | `patient_id` (PK), `birth_date`, `age`, `gender` (M/F/NB), `blood_type`, `registered_date` | `age` is stored, not computed — generator/repair keep it consistent with `birth_date`. No FK dependencies. |
+| `patients` | `patient_id` (PK), `birth_date`, `age`, `gender` (M/F/NB, identity), `sex_at_birth` (M/F), `blood_type`, `registered_date` | `age` is stored, not computed — generator/repair keep it consistent with `birth_date`. `gender` is identity; `sex_at_birth` drives the sex-specific rules (pregnancy and prostate diagnoses, deliveries, Pap smears, adult admission to OB/GYN), following the separate sex and gender elements of USCDI Version 2. For M and F patients the two agree; for NB patients `sex_at_birth` is drawn 50/50. No FK dependencies. |
 | `doctors` | `doctor_id` (PK), `specialty`, `department_id` (FK), `hire_date` | `specialty` drives department assignment via `SPECIALTY_TO_DEPARTMENT` in the generator. Every department is guaranteed at least one doctor (see [METHODOLOGY.md](METHODOLOGY.md)). |
 | `nurses` | `nurse_id` (PK), `position`, `department_id` (FK), `hire_date` | `position` drives department assignment via `NURSE_POSITION_TO_DEPARTMENT`. |
 | `employees` | `employee_id` (PK), `position`, `department_id` (FK, nullable), `salary` | Non-clinical staff; `department_id` is `NULL` for hospital-wide roles (IT, HR, etc.). |

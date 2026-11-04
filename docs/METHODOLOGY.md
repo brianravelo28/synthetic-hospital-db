@@ -4,12 +4,24 @@ How the data is built, how it is checked, what each round of fixes found, and wh
 
 ## Summary
 
-- A generator builds the 17-table database, a validator runs **59 consistency checks**, and a repair step fixes what is left. The generator prevents most violations; at large size repair fixes only the newborn registration date.
-- Four rounds of fixes, each measured before and after: generator fixes, independent realism checks, treatments that fit the diagnosis, and realistic occupancy.
-- The first generator's data passed the original six check groups with 19 violations; the 16 independent checks written afterwards found 59,105.
-- Everything is synthetic, and the checks test consistency with rules I wrote, not clinical realism. See [Known limitations](#known-limitations).
+- A generator builds the 17-table database, a validator runs **59 consistency checks**, and a repair step fixes what is left. The generator prevents almost every violation. Repair is a safety net: at large size it changes only the newborn registration date.
+- Five rounds of fixes, each measured before and after: generator fixes, independent realism checks, treatments that fit the diagnosis, realistic occupancy, and sex at birth with routing.
+- The same large hospital, measured at three points (next section), went from 99,532 violations in the first generator to 59,124 after round one to 71 now, all before repair.
+- **What is based on what.** The table and field layout follows published hospital-database designs ([CITATIONS](CITATIONS.md)). Every number and proportion in the data (diagnosis weights, age mix, stay lengths, occupancy targets, charges, bill lags) is a random draw from settings I chose, not a measurement of real hospitals. The checks are rules I wrote. The data is therefore internally consistent, not clinically realistic. See [Known limitations](#known-limitations).
 
-Terms: a *foreign key* links a column to another table's row; `CHECK` is a constraint that rejects a row breaking a rule; ICD-10 is the diagnosis coding system; CPT is the procedure coding system; ESI is the Emergency Severity Index, a 1 (most urgent) to 5 triage scale.
+Terms: a *foreign key* links a column to another table's row; `CHECK` is a constraint that rejects a row breaking a rule; ICD-10-CM is the US diagnosis coding system; CPT is the procedure coding system; ESI is the Emergency Severity Index, a 1 (most urgent) to 5 triage scale.
+
+## Three snapshots
+
+The large dataset is compared at three points. Every count is **before repair**, what the generator produced by itself.
+
+| Snapshot | What it is | Violations |
+|---|---|---|
+| Pre-patch | The first generator, before round one | 99,532 on the 51 checks that existed then |
+| Post-round-one | The generator after the round-one patches | 19 in the original six groups, and 59,105 in the 16 realism checks written afterwards (59,124 together) |
+| Current | The present generator | 71 on all 59 checks (0 after repair) |
+
+The set of checks grew between snapshots, so the totals show direction, not a like-for-like rate. The 19 in the post-round-one snapshot were all one rule, the newborn registration date, which repair fixes. Later rounds are measured against their own baselines, named where they appear.
 
 ## The 59 checks
 
@@ -21,12 +33,12 @@ Every check is a SQL query that counts violations. They are grouped by what they
 | 2. Age-based | 6 | Age that does not fit the context: a "newborn" admission for a patient older than 0, a child admitted to Geriatric, an adult admitted to Pediatrics, a newborn-only diagnosis code on an older patient | Yes |
 | 3. Admission type | 8 | Scheduled (future) admissions that already have triage, diagnoses, procedures, medications, tests, a bill or a room; an emergency admission with a low-urgency (ESI 4–5) triage | Yes |
 | 4. Department consistency | 3 | An admitting doctor or a room from a different department than the admission; a room type that does not suit the patient's condition (for example an "Intensive" patient in a standard room) | Yes |
-| 5. Diagnosis alignment | 3 | A pregnancy or breast-cancer code on a male patient, a prostate-cancer code on a female patient, a newborn-only code on an adult | Yes |
+| 5. Diagnosis alignment | 3 | A pregnancy or breast-cancer code on a patient born male, a prostate-cancer code on a patient born female, a newborn-only code on an adult | Yes |
 | 6. Financial | 5 | A bill total that is not the sum of its line items; a denied bill that still shows coverage; a written-off bill that still charges the patient; payment dates that do not match payment status | Yes |
 | 7. Operational realism | 18 | Things that look wrong in a join or on a dashboard: more patients admitted than a department has beds, a room holding more patients than it has beds, a patient admitted while still in an earlier stay, a patient "admitted" for over 60 days, a billed procedure that belongs to a different admission, a patient registered before they were born, staff recorded acting before their hire date | No (detect-only) |
-| 8. Clinical coherence | 6 | Treatments that contradict the patient or diagnosis: a delivery on a patient who is not female or not of childbearing age, chemotherapy with no cancer diagnosis, insulin or metformin with no diabetes diagnosis, a Pap smear on a patient who is male or under 21 | No (detect-only) |
+| 8. Clinical coherence | 6 | Treatments that contradict the patient or diagnosis: a delivery on a patient who was not born female or is not of childbearing age, chemotherapy with no cancer diagnosis, insulin or metformin with no diabetes diagnosis, a Pap smear on a patient who was not born female or is under 21 | No (detect-only) |
 
-Groups 1 to 6 were written alongside the generator, so a clean result there shows the generator follows its own rules. Groups 7 and 8 were written afterwards and deliberately not designed around, to catch problems the generator was never built to avoid. They only report, because repairing them (for example a bill line that points at another patient's procedure) would mean inventing data.
+Groups 1 to 6 were written alongside the generator, so a clean result there shows the generator follows its own rules. Groups 7 and 8 were written afterwards, without reference to the generator, to catch problems it was never built to avoid. Once they found problems, the generator was fixed until they passed, so a clean result there means it passes the checks it was tuned against, not that the checks are complete. They only report, because repairing them (for example a bill line that points at another patient's procedure) would mean inventing data.
 
 ## Round one: generator fixes
 
@@ -35,7 +47,7 @@ The first generator produced rows that were individually plausible but collectiv
 | Problem | Fix |
 |---|---|
 | Admission department and type ignored the patient's age (a newborn in Cardiology; the type "Newborn" on an 80-year-old) | Age-bucketed department pools; "Newborn" only for newborns |
-| Diagnoses were sampled with no department, sex or age filter (pregnancy codes on male patients) | Department-filtered sample that rejects sex- and age-impossible codes, with a whole-catalog fallback (a resample loop alone still failed about 6.7% of the time for male patients in OB/GYN, whose diagnosis pool is almost all female-only; this is a unit test) |
+| Diagnoses were sampled with no department, sex or age filter (pregnancy codes on male patients) | Department-filtered draw, with the sex- and age-impossible codes removed from the pool first. The first version redrew up to 10 times and then fell back, without any record, to the whole catalog; that affected an estimated 0.2% of admissions, nearly all male patients routed to OB/GYN. Round five removed the fallback |
 | Room assignment ignored the patient's condition | Rooms filtered to the types allowed for the condition (since replaced by the allocator in round four) |
 | Bill dates ignored the discharge date | Bills dated 0 to 90 days after discharge |
 
@@ -44,15 +56,15 @@ The archived pre-patch generator is not in this repository, so the comparison be
 | Group | Pre-patch generator | Current generator |
 |---|---|---|
 | 1 · Temporal | 1,548 | 0 |
-| 2 · Age-based | 4,250 | 70 |
+| 2 · Age-based | 4,250 | 71 |
 | 3 · Admission type | 14,645 | 0 |
 | 4 · Department | 5,119 | 0 |
 | 5 · Diagnoses | 1,803 | 0 |
 | 6 · Financial | 10,936 | 0 |
 | 7 · Realism (detect-only) | 61,231 | 0 |
-| **Total** | **99,532** | **70** |
+| **Total** | **99,532** | **71** |
 
-(Small: 6,177 → 2. Medium: 25,681 → 21. The pre-patch column covers the 51 checks that existed then; Group 8 and the new room check were written later and were not run against that output. The current column is the latest recorded run.) The round-one patches targeted groups 1, 2, 4 and 5, which together fell from 12,720 violations (1,548 + 4,250 + 5,119 + 1,803) to 70; groups 3 and 6 were untouched until round two. The improvement is measured for the patches together, not for each one separately.
+(Small: 6,177 → 2. Medium: 25,681 → 17. The pre-patch column covers the 51 checks that existed then; Group 8 and the new room check were written later and were not run against that output. The current column is the latest recorded run.) The round-one patches targeted groups 1, 2, 4 and 5, which together fell from 12,720 violations (1,548 + 4,250 + 5,119 + 1,803) to 71; groups 3 and 6 were untouched until round two. The improvement is measured for the patches together, not for each one separately.
 
 **The pre-patch output cannot be repaired.** Run through the current `repair_all()`, it fails at every scale: moving a bill's date forward to its discharge date violates the table's own `CHECK (payment_date >= bill_date)` constraint (MariaDB error 4025 on `chk_payment_date`), because those bills had payment dates before the discharge. The current generator never produces the conflicting dates.
 
@@ -62,7 +74,7 @@ At small scale (25 doctors, 20 departments), random assignment left 10 departmen
 
 ## Round two: independent realism checks
 
-Round one ended with a validator that reported almost nothing, as expected, because the generator had been built to satisfy its rules. Group 7 was added afterwards: each rule catches something that looks wrong on the dashboard or in a join. Run against the large dataset the earlier generator had produced (groups 1–6 reported **19** violations on it, a fixed baseline in `docs/validation_runs/baseline_before_fixes_large.csv`), the 16 realism checks that existed then found:
+Round one ended with a validator that reported almost nothing, as expected, because the generator had been built to satisfy its rules. Group 7 was added afterwards: each rule catches something that looks wrong on the dashboard or in a join. Run against the large dataset of the post-round-one snapshot (before repair, groups 1–6 reported **19** violations on it; the baseline is fixed in `docs/validation_runs/baseline_before_fixes_large.csv`), the 16 realism checks that existed then found:
 
 | Check | Violations | What was wrong | Fix in the generator |
 |---|---|---|---|
@@ -96,13 +108,13 @@ Procedures, medications and tests had been drawn uniformly at random from their 
 |---|---|---|
 | `diabetes_drug_without_diabetes_dx` | 1,643 | Insulin or metformin on an admission with no diabetes diagnosis |
 | `delivery_without_obstetric_dx` | 879 | A delivery procedure with no obstetric diagnosis |
-| `delivery_wrong_patient` | 711 | A delivery on a patient who is not female or not aged 12–55 (445 of 907 deliveries were on male patients) |
+| `delivery_wrong_patient` | 711 | A delivery on a patient who is not female or not aged 12–55 (445 of 907 deliveries were on male patients; the rule now uses sex at birth, see round five) |
 | `cancer_treatment_without_cancer_dx` | 680 | Chemotherapy or radiation with no cancer diagnosis (680 of the 839 such procedures) |
 | `pap_smear_wrong_patient` | 480 | A Pap smear on a patient who is not female or is under 21 |
 | `adult_surgery_on_minor` | 306 | Bypass surgery, hip or knee replacement or hip-fracture fixation on a patient under 18 |
 | **Total** | **4,699** | |
 
-The baseline is `app/data/validation_baseline_pre_coherence.csv`. `data/clinical_rules.py` maps each ICD-10 code to a family (cardiac, respiratory, diabetes, oncology, obstetric and so on) and each family to plausible procedures, drugs and tests, with code-level overrides where one code is far more specific (appendicitis leads to an appendectomy; type 1 diabetes gets insulin only). A fifth of treatments come from a general-care pool (acetaminophen, a metabolic panel, a ward round). Eligibility filters use the patient's sex and age at admission, from `birth_date`: deliveries need a female patient of childbearing age, major adult surgery needs an adult, a Pap smear needs a woman of 21 or over, and a few drugs are withheld from young children.
+The baseline is `app/data/validation_baseline_pre_coherence.csv`. `data/clinical_rules.py` maps each ICD-10 code to a family (cardiac, respiratory, diabetes, oncology, obstetric and so on) and each family to plausible procedures, drugs and tests, with code-level overrides where one code is far more specific (appendicitis leads to an appendectomy; type 1 diabetes gets insulin only). A fifth of treatments come from a general-care pool (acetaminophen, a metabolic panel, a ward round). Eligibility filters use the patient's sex at birth and age at admission, from `birth_date`: deliveries need a patient born female and of childbearing age, major adult surgery needs an adult, a Pap smear needs a patient born female and 21 or over, and a few drugs are withheld from young children.
 
 Group 8 is written separately from CPT codes and drug names, not from the generator's mapping, so it tests the output instead of repeating the generator's rules. It finds 0 violations before repair at all three sizes. The mapping is coarse and hand-built, not clinical guidance: Group 8 catches contradictions, not oddness. The diabetes rule is deliberately strict (hospitals do sometimes give insulin to patients without diabetes).
 
@@ -111,21 +123,49 @@ Group 8 is written separately from CPT codes and drug names, not from the genera
 The hospital had been nearly empty: 12,000 admissions over about 6.7 years left roughly 20 inpatients on average against 338 beds and 560 rooms (about 6%). Nothing stopped two stays sharing a room or one patient being in two beds at once; the emptiness hid both.
 
 - **One-year window.** Admissions cover the last 365 days (`ADMISSION_WINDOW_DAYS`), with the same admission counts per size (800, 3,200, 12,000). Staff and patient identities and birth dates are unchanged.
-- **Rooms sized from load.** `data/occupancy.py` computes each department's expected patient-days from how patients are routed by age and the stay-length distribution, then sizes each room type for a planned occupancy (`OCCUPANCY_TARGET`: Standard 60%, Private 58%, ICU 78%, NICU 75%, Isolation 55%, applied 10% tighter because rounding up to whole rooms leaves the realised figure below plan). Every department has at least one Standard and one ICU room. OR, ER and Recovery rooms exist but never hold an admission and are not beds. A department's `bed_capacity` is the sum of its inpatient rooms' beds.
+- **Rooms sized from load.** `data/occupancy.py` computes each department's expected patient-days from how patients are routed by age and sex and the stay-length distribution, then sizes each room type for a planned occupancy (`OCCUPANCY_TARGET`: Standard 60%, Private 58%, ICU 78%, NICU 75%, Isolation 55%), planned 10% tighter (`OCCUPANCY_SIZING_FACTOR`). The targets and the factor are my choices, set so that the large hospital lands near 65% average occupancy (busy but not full); they are not taken from any hospital's figures. Every department has at least one Standard and one ICU room. OR, ER and Recovery rooms exist but never hold an admission and are not beds. A department's `bed_capacity` is the sum of its inpatient rooms' beds.
 - **One bed per patient, none over capacity.** Admissions are placed in date order. A stay cannot start before the same patient's previous stay ends (it moves to that time; a later admission for a patient still in hospital is cancelled), and a room never holds more patients than it has beds. A patient with no suitable bed waits for one (up to a week, `MAX_BED_WAIT_HOURS`; a newborn up to a day), then is placed at a lower level of care, and is cancelled only if no bed frees in time. Waiting moves the admission and discharge dates together.
-- **Two new Group 7 checks.** `room_double_booked`: with rooms assigned the old way (a random suitable room, no capacity check) in this one-year hospital it would find 5,127 double-booked stays at large size and 1,050 at medium. `patient_overlapping_admissions`: stays that begin while the patient is in an earlier one; random dates had produced 37 (0.34%) in the earlier six-year data and 208 (1.9%) in the one-year data. Both baselines are in `app/data/validation_baseline_pre_occupancy.csv`; both checks find 0.
+- **Two new Group 7 checks.** `room_double_booked`: with rooms assigned the old way (a random suitable room, no capacity check) in this one-year hospital it would find 5,127 double-booked stays at large size and 1,050 at medium. `patient_overlapping_admissions`: stays that begin while the patient is in an earlier one; random dates had produced 37 (0.34% of stays that happened) in the earlier six-year data and 208 (1.9%) in the one-year data. These baselines were measured on the data of that time and are kept in `app/data/validation_baseline_pre_occupancy.csv`; both checks find 0.
 
 Measured on the generated data, averaged over the days after a 45-day warm-up (the hospital starts empty):
 
 | Size | Rooms | Inpatient beds | Average census | Average bed occupancy | Busiest day |
 |---|---|---|---|---|---|
-| Small | 47 | 62 | 9 | 15% | 31% |
-| Medium | 75 | 84 | 37 | 44% | 57% |
-| Large | 204 | 218 | 138 | 63% | 76% |
+| Small | 47 | 62 | 9 | 15% | 27% |
+| Medium | 75 | 84 | 37 | 44% | 69% |
+| Large | 199 | 212 | 137 | 65% | 78% |
 
-At large size, average occupancy is Standard 61%, Private 68%, ICU 68%, Isolation 47% (NICU has 2 beds), and the condition mix stays close to the drawn mix (Intensive 14.0% against 15%). Keeping rooms within capacity took, at large size, 2,168 admissions (20%) waiting for a bed (mean 44 hours), 120 (1.1%) placed at a lower level of care, 225 (2.1%) moved to after the same patient's previous stay and 19 (0.18%) cancelled; at medium, 587 (20%) waited, 90 (3.1%) were stepped down and 8 cancelled; at small, 58 (8%) waited and 12 (1.7%) were stepped down. Each department's rooms are a separate pool, and small pools are often full, so some waiting is unavoidable at a realistic occupancy. Small and medium stay sparse because every department needs an ICU and a Standard room: a floor, not a target.
+**Planned and realised occupancy.** The realised figures differ from the plan, in both directions:
+
+| Room type | Planned | Realised at large |
+|---|---|---|
+| Standard | 60% | 62% |
+| Private | 58% | 69% |
+| ICU | 78% | 71% |
+| NICU | 75% | 51% (2 beds) |
+| Isolation | 55% | 46% |
+
+Rooms come in whole units, every department needs a Standard and an ICU room, and each department's rooms are a separate pool, so a small pool can be full while the hospital is not. I have not separated how much each of these contributes. The condition mix stays close to the drawn mix (Intensive 14.0% against 15%).
+
+**What keeping rooms within capacity cost.** Every rate is a share of the admissions that needed a bed: those that happened (admitted or discharged), 724 at small, 2,895 at medium and 10,844 at large. At large size, 2,444 (22.5%) waited for a bed (mean 45 hours), 130 (1.2%) were placed at a lower level of care, 221 (2.0%) were moved to after the same patient's previous stay and 51 (0.47%) were cancelled for lack of a bed. At medium: 668 (23.1%) waited, 121 (4.2%) were stepped down, 67 (2.3%) were moved, 5 (0.17%) were cancelled. At small: 50 (6.9%) waited, 15 (2.1%) were stepped down, 13 (1.8%) were moved, none were cancelled. Some waiting is unavoidable at a realistic occupancy. Small and medium stay sparse because every department needs an ICU and a Standard room: a floor, not a target.
 
 **Census** is the number of patients in an inpatient bed at midnight; **bed occupancy** is census divided by inpatient beds (Standard, Private, ICU, NICU, Isolation). The dashboard and practice question 11 use these definitions.
+
+## Round five: sex at birth and routing
+
+An audit of the project found two gaps, both about sex.
+
+- **One field did two jobs.** `patients.gender` (M, F or NB) was used both as a person's gender and as the basis for medical rules. Pregnancy and prostate disease follow anatomy, not gender identity, and the 318 NB patients (4%) had no sex filter on their diagnoses at all: in the earlier data, 54 of their 961 diagnoses carried a male-only or female-only code.
+- **Routing ignored sex.** Any adult could be admitted to OB/GYN. In the earlier data, 251 adult admissions in OB/GYN (228 that happened) were not for patients recorded as F, so a male patient admitted to OB/GYN received one of the few codes left in its seven-code pool, or a code from another department.
+
+Changes:
+
+- **`sex_at_birth`** (M or F) is a new column on `patients`, stored separately from `gender`, as USCDI Version 2 lists "Sex (assigned at birth)" and "Gender Identity" as separate data elements. Every sex-specific rule (diagnosis codes, deliveries, Pap smears) now uses it. For M and F patients it equals `gender`; for NB patients it is drawn 50/50. That is a simplification of my own: the data has no patients whose gender differs from their sex at birth other than NB.
+- **Adults are admitted to OB/GYN only if they were born female.** Newborns still go to OB/GYN or Pediatrics whatever their sex.
+- **Diagnosis sampling filters first.** The codes a patient cannot have are removed from the department's pool and one weighted draw is made, which is the same distribution as redrawing until a code fits. The fallback to other departments' codes is gone: if a department has no allowed code, sampling raises an error. A test checks every department, sex and age band the router can produce (59 combinations), so it cannot happen. The repair step uses the same sampler.
+- **Rates have a stated base.** The allocator now reports the number of admissions that needed a bed, and every occupancy rate above is quoted against it.
+
+The sex rules still find 0 violations before repair at all three sizes. The earlier counts (54 and 251) come from the CSVs of the previous release (commit `63d0312`) read under the new rules.
 
 ## Results across scale
 
@@ -134,10 +174,10 @@ Each run: generate, validate before any repair, repair, validate again. "Before 
 | Scale | Admissions | Before repair | After repair | What remains before repair |
 |---|---|---|---|---|
 | Small | 800 | 2 | 0 | 2 newborn registration dates |
-| Medium | 3,200 | 21 | 0 | 21 newborn registration dates |
-| Large | 12,000 | 70 | 0 | 70 newborn registration dates |
+| Medium | 3,200 | 17 | 0 | 17 newborn registration dates |
+| Large | 12,000 | 71 | 0 | 71 newborn registration dates |
 
-The newborn registration date is the only thing repair changes at any size. (When rooms were assigned at random, a department with no room suited to a patient's condition left a few `condition_room_mismatch` violations at small and medium scale; the room allocator removed that case.)
+The newborn registration date is the only thing repair changes at any size, so repair is a safety net, not the source of the data's quality. The generator creates patients before their admissions exist, which is why a newborn's registration date cannot be right when it is first drawn. (When rooms were assigned at random, a department with no room suited to a patient's condition left a few `condition_room_mismatch` violations at small and medium scale; the room allocator removed that case.)
 
 ## Pipeline, dashboard and reproducibility
 
@@ -147,23 +187,25 @@ The newborn registration date is the only thing repair changes at any size. (Whe
 
 ## Tests
 
-- `test_generator_units.py`: pure logic: age sampling, hire dates, nobody acting before being hired, no impossible diagnosis codes, age-banded vitals, constants shared by generator and validator, no wall-clock reads.
+- `test_generator_units.py`: pure logic: age sampling, hire dates, nobody acting before being hired, no impossible diagnosis codes for either sex at birth, every department/sex/age combination the router can produce has an allowed diagnosis, age-banded vitals, constants shared by generator and validator, no wall-clock reads.
 - `test_clinical_rules.py`: the diagnosis-to-treatment mapping (everything it names exists; no deliveries for men, chemotherapy without cancer or insulin without diabetes over hundreds of seeded draws).
 - `test_occupancy.py`: room planning, and allocation (no room over capacity, no patient in two beds, waits only move an admission later, step-down after a long wait, a newborn waits at most a day).
 - `test_validator_and_app.py`: the rule set (59 unique rules, each with a dashboard description), the chart table views and the census calculation.
 - `test_practice.py`: every practice solution runs, the four data-quality solutions return no rows, and the SQL census matches the dashboard's.
 - `test_shipped_data.py`: pandas versions of the realism rules run against the CSVs in `app/data/`, so a regression is caught without a database. When first written, 8 of these tests failed against the pre-fix CSVs from git history.
 - `test_pipeline_integration.py`: the whole pipeline against a real database. All 59 checks run; groups 3, 6 and 8 and the room and patient-overlap checks have no violations before repair; the same pinned date gives identical tables and a different date different tables; repair run twice changes nothing; the room check fires when two stays are forced into one bed. It regenerates the target database, so it runs only when `HOSPITAL_DB_URL` is set.
-- `.github/workflows/ci.yml` runs the tests that need no database on Python 3.11, and the integration tests against a MariaDB 10.4 container.
+- `test_rules_fire.py`: can each check fail? For every one of the 59 rules it makes one violation inside a transaction on a freshly generated small database, runs the check and rolls back. For 56 rules the count goes up. For 3 (`discharge_before_admission`, `result_before_test`, `payment_before_bill`) the table's own `CHECK` constraint rejects the row, so the violation cannot exist in the database and the validator rule is a second line of defence. The expected outcome is stored with each case, so a schema change that flips one fails the test. It regenerates the target database, so it runs only when `HOSPITAL_DB_URL` is set.
+- `.github/workflows/ci.yml` runs the tests that need no database on Python 3.11, and the integration tests against MariaDB 10.4 (the version used in development) and 10.11 (a supported long-term release).
 
 ## Known limitations
 
-- **The checks measure consistency with rules I wrote**, not clinical realism. The diagnosis-to-treatment mapping is coarse and hand-built; Group 8 catches contradictions, not oddness. Age follows a hand-set curve (`AGE_BANDS`), and vitals ranges are plausible bands, not clinical references.
+- **Structure is sourced; numbers are not.** The table and field layout follows published hospital-database designs. Every proportion and amount is a random draw from settings I chose: age mix, diagnosis weights, stay lengths, occupancy targets, bill lags, charges, staffing levels, the share of each admission type. Findings such as "Emergency Medicine has the most admissions" describe this dataset, not any hospital.
+- **The checks measure consistency with rules I wrote**, not clinical realism, and Groups 7 and 8 were tuned against: the generator was fixed until they passed. What is tested is that every check can fire (`test_rules_fire.py`), not that the set of checks is complete. The diagnosis-to-treatment mapping is coarse and hand-built; Group 8 catches contradictions, not oddness. Age follows a hand-set curve (`AGE_BANDS`), and vitals ranges are plausible bands, not clinical references.
 - **Diagnosis weights are hand-assigned judgement** (2.5 to 9.5, common conditions higher), not taken from CMS/HCUP or any study. The catalog is 66 ICD-10 codes in 13 categories.
-- **Occupancy has side effects.** Keeping rooms within capacity means about 1 in 5 admissions starts when a bed frees, not at the drawn time, and a small share of patients are recorded at a lower level of care than drawn. Small and medium sizes are sparse (15% and 44% bed occupancy).
+- **Occupancy has side effects.** Keeping rooms within capacity means about 22% of admissions at large size start when a bed frees, not at the drawn time, and about 1% of patients are recorded at a lower level of care than drawn. Realised occupancy by room type differs from the plan (table above). Small and medium sizes are sparse (15% and 44% bed occupancy).
 - **Groups 7 and 8 have no repair**, by design; they only report.
 - **Staff are attributed hospital-wide**: diagnoses, procedures, medications and tests go to any already-hired doctor, not one from the admission's department.
 - **`patients.age` is a snapshot** taken at generation; department routing uses it, while Group 8 and the treatment rules use age at admission.
-- **Diagnosis sampling** uses a bounded resample with a whole-catalog fallback; filtering the pool once and drawing once would be simpler and could not fail silently.
+- **Sex and gender are simplified.** Sex at birth equals gender for M and F patients and is drawn 50/50 for NB; no other combinations occur.
 - **No live-database mode.** The dashboard reads only the CSVs; re-run the pipeline and push the result to refresh the deployed app.
-- **Developed on MariaDB 10.4.** MySQL 8 is untested; CI covers Python 3.11 and MariaDB 10.4 only.
+- **Developed on MariaDB 10.4**, which reached end of life in June 2024 (it is what XAMPP ships). CI also runs 10.11, a supported long-term release. MySQL 8 is untested.

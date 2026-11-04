@@ -24,9 +24,11 @@ pg = st.navigation(pages)
 
 with st.sidebar:
     st.caption(
-        "Synthetic data — generated + constraint-repaired via "
-        "hospital_generator.py / validate_repair.py.\n\n"
-        "Not real patient data."
+        "Synthetic data, not real patient data.\n\n"
+        "The table layout follows published hospital-database designs. Every number and "
+        "proportion (diagnosis mix, age, stay length, occupancy, charges) is chosen, not "
+        "measured from real hospitals, so findings describe this dataset, not the real world. "
+        "[Sources and details](https://github.com/brianravelo28/synthetic-hospital-db/blob/main/docs/CITATIONS.md)"
     )
 
 pg.run()

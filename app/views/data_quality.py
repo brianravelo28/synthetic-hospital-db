@@ -51,8 +51,8 @@ RULE_DESCRIPTIONS = {
     "room_dept_mismatch": "Room belongs to a different department than the admission",
     "condition_room_mismatch": "Room type doesn't suit the patient's condition (e.g. 'Intensive' in a standard room)",
     # Group 5 — diagnoses
-    "male_impossible_codes": "Pregnancy or breast-cancer code on a male patient",
-    "female_impossible_codes": "Prostate-cancer code on a female patient",
+    "male_impossible_codes": "Pregnancy or breast-cancer code on a patient born male",
+    "female_impossible_codes": "Prostate-cancer code on a patient born female",
     "newborn_codes_on_adults": "Newborn-only code on a patient older than 1",
     # Group 6 — financial
     "billing_amount_mismatch": "Bill total doesn't equal the sum of its line items",
@@ -80,12 +80,12 @@ RULE_DESCRIPTIONS = {
     "staff_event_before_hire": "Doctor or nurse recorded acting before their hire date",
     "shift_before_hire_or_wrong_dept": "Shift before the staff member's hire date, or outside their own department",
     # Group 8 — clinical coherence
-    "delivery_wrong_patient": "A delivery procedure on a patient who is not female or not of childbearing age (12-55)",
+    "delivery_wrong_patient": "A delivery procedure on a patient who was not born female or is not of childbearing age (12-55)",
     "delivery_without_obstetric_dx": "A delivery procedure on an admission with no obstetric diagnosis",
     "adult_surgery_on_minor": "Bypass surgery, hip/knee replacement or hip-fracture fixation on a patient under 18",
     "cancer_treatment_without_cancer_dx": "Chemotherapy or radiation on an admission with no cancer diagnosis",
     "diabetes_drug_without_diabetes_dx": "Insulin or metformin on an admission with no diabetes diagnosis",
-    "pap_smear_wrong_patient": "A Pap smear on a patient who is not female or is under 21",
+    "pap_smear_wrong_patient": "A Pap smear on a patient who was not born female or is under 21",
 }
 
 GROUP_SHORT = {
@@ -177,16 +177,16 @@ st.caption("Each row is the most recent recorded run at that scale; exact counts
 st.divider()
 
 # ── The independent checks vs the pre-fix data ──────────────────────────
-st.subheader("What the independent checks found before the fixes")
+st.subheader("What the realism checks found before the fixes")
 old_12_6 = int(baseline.loc[baseline["group"] != "group7_realism", "count"].sum())
 old_7 = baseline[baseline["group"] == "group7_realism"].copy()
 st.markdown(
-    f"Run against the dataset produced by the generator **before** these fixes, checks 1–6 reported "
+    f"Run against the dataset the generator produced **before** these fixes (before repair), checks 1–6 reported "
     f"only **{old_12_6}** violations — the generator had been built to satisfy exactly those rules. "
     f"The 16 realism checks, added afterwards, found **{fmt_count(old_7['count'].sum())}**: a dashboard "
     f"showing 2,409 patients 'currently admitted' (one admitted in 2020), line items pointing at "
     f"other patients' procedures, doctors treating before they were hired. Each one was then fixed "
-    f"in the generator, and the same checks now pass on fresh data."
+    f"in the generator until the same checks passed on fresh data."
 )
 old_7["what"] = old_7["rule"].map(RULE_DESCRIPTIONS)
 old_7 = old_7[old_7["count"] > 0].sort_values("count")
@@ -207,10 +207,10 @@ clin = baseline_clinical.rename(columns={"count": "before"}).merge(
 )
 st.markdown(
     f"Procedures, medications and tests used to be drawn at random, independent of each other and of "
-    f"the patient. Six hard contradictions (a delivery on a male patient, chemotherapy with no cancer "
+    f"the patient. Six hard contradictions (a delivery on a patient born male, chemotherapy with no cancer "
     f"diagnosis, insulin with no diabetes) showed up **{fmt_count(clin['before'].sum())}** times in the "
     f"earlier large dataset. The generator now chooses treatments from each admission's own diagnoses "
-    f"and the patient's sex and age; the same six checks find **{fmt_count(clin['now'].sum())}** now. "
+    f"and the patient's sex at birth and age; the same six checks find **{fmt_count(clin['now'].sum())}** now. "
     f"The checks are written from CPT codes and drug names, separately from the generator's mapping."
 )
 cl = clin.melt(id_vars="rule", value_vars=["before", "now"], var_name="stage", value_name="violations")
@@ -247,5 +247,6 @@ st.info(
     "**What this does and doesn't prove.** Zero violations means the data is consistent with these "
     f"{len(report)} rules, written for this project — not that it is clinically realistic. Group 8 "
     "catches the clear contradictions only; a medication or procedure can still be an odd choice for a "
-    "diagnosis without breaking any of its six rules."
+    "diagnosis without breaking any of its six rules. The realism and clinical checks were written "
+    "without reference to the generator, but the generator was then fixed until they passed."
 )
