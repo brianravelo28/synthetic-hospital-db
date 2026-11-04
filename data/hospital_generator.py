@@ -11,7 +11,7 @@ results: docs/METHODOLOGY.md):
   Round one (groups 1-6 of the validator)
     - Admission department & type are driven by patient age.
     - Room is chosen to suit the patient's condition.
-    - Diagnoses are department-filtered and never gender/age-impossible.
+    - Diagnoses are department-filtered and never sex/age-impossible.
     - Every department gets at least one doctor (and one room).
 
   Round two (group 7, the independent realism checks)
@@ -67,7 +67,7 @@ from faker.providers.date_time import change_year
 from occupancy import allocate_rooms, expected_stay_days, plan_rooms
 from shared_rules import (
     ADMISSION_WINDOW_DAYS, AS_OF, INPATIENT_ROOM_TYPES, ROOM_BEDS, CONDITION_ROOM_MAP, FEMALE_IMPOSSIBLE_CODES, MALE_IMPOSSIBLE_CODES,
-    NEWBORN_ONLY_CODES, OB_NEWBORN_DEPTS, PAYER_COVERAGE,
+    NEWBORN_ONLY_CODES, OB_NEWBORN_DEPTS, PAYER_COVERAGE, FEMALE_ONLY_DEPTS, impossible_codes,
 )
 
 
@@ -351,6 +351,13 @@ CHIEF_COMPLAINTS = [
 NEWBORN_DEPT_POOL   = sorted(OB_NEWBORN_DEPTS)
 PEDIATRIC_DEPT_POOL = ['DEP-008', 'DEP-001', 'DEP-002']
 
+# Gender identity of patients (hand-set proportions). Sex at birth is stored separately and drives the
+# sex-specific clinical rules: it equals gender for M and F, and is drawn 50/50 for NB. Adults go to
+# OB/GYN only if their sex at birth is F.
+PATIENT_GENDERS  = ['M', 'F', 'NB']
+PATIENT_GENDER_P = [0.48, 0.48, 0.04]
+NB_SEX_AT_BIRTH_P = [0.5, 0.5]            # for 'M', 'F'
+
 NEWBORN_ADM_TYPES   = ['Newborn', 'Emergency', 'Urgent']
 NEWBORN_ADM_TYPE_P  = [0.60, 0.25, 0.15]
 # a patient can only be born once, so only their first admission can be 'Newborn'
@@ -513,40 +520,21 @@ ROOM_RATES = {
 }
 
 
-def _sample_valid_diagnosis(dept_name: str, gender: str, age: int) -> dict:
+def _sample_valid_diagnosis(dept_name: str, sex_at_birth: str, age: int) -> dict:
     """
-    Department-filtered diagnosis sampling that also avoids
-    gender/age-impossible codes, mirroring repair_diagnoses' resample
-    loop in validate_repair.py so generation rarely needs that repair.
+    One department-weighted diagnosis that is possible for this patient's
+    sex at birth and age: the codes the patient cannot have are removed from the
+    department's pool, then a single weighted draw is made (impossible_codes in
+    shared_rules.py).
 
-    Some departments (e.g. OB/GYN) have a diagnosis pool that is almost
-    entirely gender-restricted, so a bounded resample within that
-    department can still fail for a mismatched patient. If it does,
-    fall back to sampling the full (unfiltered-by-department) list,
-    which always has plenty of gender/age-safe codes.
+    There is no fallback to another department's codes. If a department has no
+    allowed code for a patient, sample_diagnosis raises ValueError instead of
+    quietly giving a code from another specialty. Admissions are routed so this
+    cannot happen (adults go to OB/GYN only if their sex at birth is F; see FEMALE_ONLY_DEPTS), and
+    tests/test_generator_units.py checks every department, sex and age band
+    the router can produce.
     """
-    forbidden = set()
-    if gender == 'M':
-        forbidden |= MALE_IMPOSSIBLE_CODES
-    elif gender == 'F':
-        forbidden |= FEMALE_IMPOSSIBLE_CODES
-    if age is None or age > 1:
-        forbidden |= NEWBORN_ONLY_CODES
-
-    dx = sample_diagnosis(dept_name)
-    attempts = 0
-    while dx['icd10_code'] in forbidden and attempts < 10:
-        dx = sample_diagnosis(dept_name)
-        attempts += 1
-
-    if dx['icd10_code'] in forbidden:
-        dx = sample_diagnosis()
-        attempts = 0
-        while dx['icd10_code'] in forbidden and attempts < 20:
-            dx = sample_diagnosis()
-            attempts += 1
-
-    return dx
+    return sample_diagnosis(dept_name, exclude=impossible_codes(sex_at_birth, age))
 
 
 # =============================================================================
@@ -590,10 +578,10 @@ def gen_patients(conn, cfg: dict) -> list:
     print(f"  Generating {cfg['patients']} patients...")
     sql = """INSERT INTO patients
              (patient_id, first_name, last_name, ssn, birth_date, age,
-              gender, blood_type, phone, email, address, city, state,
+              gender, sex_at_birth, blood_type, phone, email, address, city, state,
               zip_code, country, registered_date)
              VALUES (:patient_id, :first_name, :last_name, :ssn, :birth_date, :age,
-                     :gender, :blood_type, :phone, :email, :address, :city, :state,
+                     :gender, :sex_at_birth, :blood_type, :phone, :email, :address, :city, :state,
                      :zip_code, :country, :registered_date)"""
 
     blood_types = ['A+',   'A-',   'B+',   'B-',   'AB+',  'AB-',  'O+',   'O-']
@@ -617,7 +605,8 @@ def gen_patients(conn, cfg: dict) -> list:
 
     for _ in range(cfg['patients']):
         pid     = gen_id("PAT")
-        gender  = np.random.choice(['M', 'F', 'NB'], p=[0.48, 0.48, 0.04])
+        gender  = np.random.choice(PATIENT_GENDERS, p=PATIENT_GENDER_P)
+        sex_at_birth = gender if gender != 'NB' else np.random.choice(['M', 'F'], p=NB_SEX_AT_BIRTH_P)
         dob     = sample_birth_date()
         age     = age_from_dob(dob)
         country = np.random.choice(['USA', fake.country_code()], p=[0.97, 0.03])
@@ -631,6 +620,7 @@ def gen_patients(conn, cfg: dict) -> list:
             "birth_date":      dob,
             "age":             age,
             "gender":          gender,
+            "sex_at_birth":    sex_at_birth,
             "blood_type":      np.random.choice(blood_types, p=blood_probs),
             "phone":           fake.phone_number()[:20],
             "email":           fake.email() if age >= 13 else None,
@@ -810,9 +800,12 @@ def _dept_load_shares(dept_ids: list) -> dict:
     newborn  = sum(w for lo, hi, w in AGE_BANDS if hi == 0)
     children = sum(w for lo, hi, w in AGE_BANDS if lo >= 1 and hi <= 17)
     adults   = 1.0 - newborn - children
-    adult_pool = [d for d in dept_ids if d != 'DEP-008']
+    female_adult_pool = [d for d in dept_ids if d != 'DEP-008']
+    other_adult_pool  = [d for d in female_adult_pool if d not in FEMALE_ONLY_DEPTS]
+    f = PATIENT_GENDER_P[PATIENT_GENDERS.index('F')]
     shares = {d: 0.0 for d in dept_ids}
-    for pool, weight in ((NEWBORN_DEPT_POOL, newborn), (PEDIATRIC_DEPT_POOL, children), (adult_pool, adults)):
+    for pool, weight in ((NEWBORN_DEPT_POOL, newborn), (PEDIATRIC_DEPT_POOL, children),
+                         (female_adult_pool, adults * f), (other_adult_pool, adults * (1 - f))):
         for d in pool:
             shares[d] += weight / len(pool)
     return shares
@@ -866,9 +859,9 @@ def gen_rooms(conn, cfg: dict, dept_ids: list, size: str) -> list:
 
 
 def _load_patient_info(conn) -> dict:
-    """{patient_id: (age, birth_date)} — drives age-aware, birth-aware admissions."""
-    result = conn.execute(text("SELECT patient_id, age, birth_date FROM patients"))
-    return {row[0]: (row[1], row[2]) for row in result}
+    """{patient_id: (age, birth_date, sex_at_birth)} — drives age-, birth- and sex-aware admissions."""
+    result = conn.execute(text("SELECT patient_id, age, birth_date, sex_at_birth FROM patients"))
+    return {row[0]: (row[1], row[2], row[3]) for row in result}
 
 
 def _load_staff_pool(conn, table: str, id_col: str) -> StaffPool:
@@ -889,8 +882,9 @@ def gen_admissions(conn, cfg: dict, patient_ids: list, dept_ids: list,
                      :admission_status, :discharge_disposition, :patient_condition,
                      :length_of_stay)"""
 
-    # Adult pool excludes Pediatrics so adults never land in DEP-008
-    adult_dept_pool = [d for d in dept_ids if d != 'DEP-008']
+    # Adult pool excludes Pediatrics so adults never land in DEP-008; OB/GYN takes only F adults
+    adult_dept_pool       = [d for d in dept_ids if d != 'DEP-008']
+    adult_dept_pool_other = [d for d in adult_dept_pool if d not in FEMALE_ONLY_DEPTS]
 
     now          = AS_OF
     adm_start    = now - timedelta(days=ADMISSION_WINDOW_DAYS)
@@ -902,16 +896,16 @@ def gen_admissions(conn, cfg: dict, patient_ids: list, dept_ids: list,
     for _ in range(cfg['admissions']):
         aid          = gen_id("ADM")
         patient_id   = random.choice(patient_ids)
-        age, dob     = patient_info[patient_id]
+        age, dob, sex_at_birth = patient_info[patient_id]
         category     = np.random.choice(ADMISSION_CATEGORIES, p=ADMISSION_CATEGORY_P)
 
-        # Department driven by patient age
+        # Department driven by patient age (and, for OB/GYN, sex at birth)
         if age == 0:
             dept_id = random.choice(NEWBORN_DEPT_POOL)
         elif age <= 17:
             dept_id = random.choice(PEDIATRIC_DEPT_POOL)
         else:
-            dept_id = random.choice(adult_dept_pool)
+            dept_id = random.choice(adult_dept_pool if sex_at_birth == 'F' else adult_dept_pool_other)
 
         # Admission type: Newborn only for a newborn's first completed admission
         if category == 'Scheduled':
@@ -989,9 +983,12 @@ def gen_admissions(conn, cfg: dict, patient_ids: list, dept_ids: list,
                  "SELECT room_id, department_id, room_type, bed_capacity FROM rooms ORDER BY room_id"))]
     stats = allocate_rooms(rows, rooms, now)
     mean_wait = stats['wait_hours'] / stats['waited'] if stats['waited'] else 0.0
-    print(f"    rooms assigned: {stats['placed']} placed; {stats['waited']} waited for a bed (mean {mean_wait:.1f} h), "
-          f"{stats['lowered']} placed at a lower level of care, {stats['cancelled']} cancelled for lack of a bed; "
-          f"{stats['patient_moved']} moved to after the same patient's previous stay")
+    n = stats['needed_bed'] or 1
+    print(f"    rooms assigned to {stats['needed_bed']} admissions that needed a bed: {stats['placed']} placed; "
+          f"{stats['waited']} ({stats['waited'] / n:.1%}) waited for a bed (mean {mean_wait:.1f} h), "
+          f"{stats['lowered']} ({stats['lowered'] / n:.1%}) placed at a lower level of care, "
+          f"{stats['cancelled']} ({stats['cancelled'] / n:.2%}) cancelled for lack of a bed; "
+          f"{stats['patient_moved']} ({stats['patient_moved'] / n:.1%}) moved to after the same patient's previous stay")
 
     execute_batch(conn, sql, [{k: v for k, v in r.items() if not k.startswith('_')} for r in rows])
     # Room status follows who is actually in the room, not a coin flip
@@ -1022,12 +1019,12 @@ def _load_admission_windows(conn) -> tuple:
 
 def _load_admission_clinical_info(conn) -> dict:
     """
-    {admission_id: {dept_name, gender, age, status, admission_type, age_at_admission}} — used to
-    sample department-appropriate, gender/age-valid ICD-10 codes, age-banded
+    {admission_id: {dept_name, sex_at_birth, age, status, admission_type, age_at_admission}} — used to
+    sample department-appropriate, sex/age-valid ICD-10 codes, age-banded
     vitals, and to decide which admissions get clinical records at all.
     """
     result = conn.execute(text("""
-        SELECT a.admission_id, dpt.dep_name, p.gender, p.age,
+        SELECT a.admission_id, dpt.dep_name, p.sex_at_birth, p.age,
                a.admission_status, a.admission_type,
                TIMESTAMPDIFF(YEAR, p.birth_date, DATE(a.admission_date))
         FROM admissions a
@@ -1036,7 +1033,7 @@ def _load_admission_clinical_info(conn) -> dict:
     """))
     info_map = {}
     for row in result:
-        info_map[row[0]] = {"dept_name": row[1], "gender": row[2], "age": row[3],
+        info_map[row[0]] = {"dept_name": row[1], "sex_at_birth": row[2], "age": row[3],
                             "status": row[4], "admission_type": row[5],
                             "age_at_admission": row[6]}
     return info_map
@@ -1110,11 +1107,11 @@ def gen_diagnoses(conn, cfg: dict, admission_ids: list, doctor_pool: StaffPool,
 
         info       = adm_info_map.get(adm_id, {})
         dept_name  = info.get('dept_name')
-        gender     = info.get('gender')
+        sex_at_birth = info.get('sex_at_birth')
         age        = info.get('age')
 
         for i in range(count):
-            dx      = _sample_valid_diagnosis(dept_name, gender, age)
+            dx      = _sample_valid_diagnosis(dept_name, sex_at_birth, age)
             dx_type = 'Primary' if i == 0 else np.random.choice(
                           ['Secondary', 'Tertiary', 'Complication'],
                           p=[0.50, 0.25, 0.25]
@@ -1163,7 +1160,7 @@ def gen_patient_procedures(conn, cfg: dict, admission_ids: list,
             rows.append({
                 "patient_procedure_id": ppid,
                 "admission_id":         adm_id,
-                "procedure_id":         pick_procedure(dx_map.get(adm_id, []), info['gender'],
+                "procedure_id":         pick_procedure(dx_map.get(adm_id, []), info['sex_at_birth'],
                                                        info['age_at_admission'], proc_ids,
                                                        emergency=info['admission_type'] == 'Emergency'),
                 "doctor_id":            doctor_pool.pick(pp_date),
@@ -1199,7 +1196,7 @@ def gen_medications(conn, cfg: dict, admission_ids: list, doctor_pool: StaffPool
         info   = adm_info_map[adm_id]
 
         for _ in range(count):
-            med        = med_by_name[pick_medication(dx_map.get(adm_id, []), info['gender'],
+            med        = med_by_name[pick_medication(dx_map.get(adm_id, []), info['sex_at_birth'],
                                                      info['age_at_admission'], list(med_by_name))]
             start      = date_within_admission(adm_dt, dis_dt)
             med_status = np.random.choice(med_statuses, p=med_status_p)
@@ -1263,7 +1260,7 @@ def gen_medical_tests(conn, cfg: dict, admission_ids: list,
 
         for _ in range(count):
             tid           = gen_id("TST")
-            test_nm       = pick_test(dx_map.get(adm_id, []), info['gender'],
+            test_nm       = pick_test(dx_map.get(adm_id, []), info['sex_at_birth'],
                                       info['age_at_admission'], list(test_lookup))
             category, cost = test_lookup[test_nm]
             test_dt       = datetime_within_admission(adm_dt, dis_dt)

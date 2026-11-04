@@ -39,6 +39,25 @@ MALE_IMPOSSIBLE_CODES   = {'O80', 'O34.21', 'O09.90', 'O20.0', 'C50.919'}
 FEMALE_IMPOSSIBLE_CODES = {'C61'}
 NEWBORN_ONLY_CODES      = {'Z38.00', 'P07.30'}
 
+# Adults are admitted to these departments only if their sex at birth is F.
+FEMALE_ONLY_DEPTS = {'DEP-009'}                      # OB/GYN
+
+
+def impossible_codes(sex_at_birth, age) -> set:
+    """
+    ICD-10 codes a patient of this sex at birth and age cannot be given. The rule uses
+    sex at birth, not gender identity: pregnancy and prostate disease follow anatomy, so
+    a patient recorded as NB is treated according to their sex at birth.
+    """
+    forbidden = set()
+    if sex_at_birth == 'M':
+        forbidden |= MALE_IMPOSSIBLE_CODES
+    elif sex_at_birth == 'F':
+        forbidden |= FEMALE_IMPOSSIBLE_CODES
+    if age is None or age > 1:
+        forbidden |= NEWBORN_ONLY_CODES
+    return forbidden
+
 # OB/GYN and newborn (Pediatrics) departments
 OB_NEWBORN_DEPTS = {'DEP-008', 'DEP-009'}
 

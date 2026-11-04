@@ -514,7 +514,7 @@ def get_diagnoses_for_department(department_name: str) -> pd.DataFrame:
     return filtered.reset_index(drop=True)
 
 
-def sample_diagnosis(department_name: str = None) -> dict:
+def sample_diagnosis(department_name: str = None, exclude=()) -> dict:
     """
     Convenience function: returns a single diagnosis dict, optionally
     filtered by department.
@@ -522,6 +522,10 @@ def sample_diagnosis(department_name: str = None) -> dict:
     Args:
         department_name: If provided, filters to department-relevant diagnoses.
                          If None, samples from the full list.
+        exclude:         ICD-10 codes that must not be returned. They are removed
+                         from the pool before the single weighted draw, so the
+                         result is the same distribution as redrawing until a
+                         code is allowed. Raises ValueError if nothing is left.
 
     Returns:
         dict with keys: icd10_code, diagnosis_name, departments, weight
@@ -534,6 +538,11 @@ def sample_diagnosis(department_name: str = None) -> dict:
         df = get_diagnoses_for_department(department_name)
     else:
         df = get_diagnoses_df()
+
+    if exclude:
+        df = df[~df['icd10_code'].isin(set(exclude))].reset_index(drop=True)
+        if df.empty:
+            raise ValueError(f"no diagnosis left for department {department_name!r} after excluding {sorted(exclude)}")
 
     weights = df['weight'].values
     weights = weights / weights.sum()

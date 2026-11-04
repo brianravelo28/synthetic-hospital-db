@@ -138,9 +138,9 @@ def test_doctors_are_hired_before_acting_and_not_too_young(d):
 # ── clinical coherence (pandas versions of validator Group 8) ────────────
 
 def _age_at_admission(adm, patients):
-    m = adm.merge(patients[["patient_id", "gender", "birth_date"]], on="patient_id")
+    m = adm.merge(patients[["patient_id", "sex_at_birth", "birth_date"]], on="patient_id")
     m["age_at_adm"] = ((m["admission_date"].dt.normalize() - m["birth_date"]).dt.days // 365.25).astype(int)
-    return m[["admission_id", "gender", "age_at_adm"]]
+    return m[["admission_id", "sex_at_birth", "age_at_adm"]]
 
 
 def _procs(d):
@@ -152,7 +152,7 @@ def _procs(d):
 def test_deliveries_only_for_women_of_childbearing_age_with_an_obstetric_diagnosis(d):
     deliveries = _procs(d)[lambda x: x["procedure_code"].isin(["59400", "59510"])]
     assert len(deliveries) > 0
-    assert (deliveries["gender"] == "F").all()
+    assert (deliveries["sex_at_birth"] == "F").all()
     assert deliveries["age_at_adm"].between(12, 55).all()
     obstetric = set(d["dx"].loc[d["dx"]["icd10_code"].str.startswith("O"), "admission_id"])
     assert deliveries["admission_id"].isin(obstetric).all()
@@ -183,7 +183,7 @@ def test_pap_smears_only_for_women_21_and_over(d):
     paps = d["tests"][d["tests"]["test_name"] == "Pap Smear"].merge(
         _age_at_admission(d["admissions"], d["patients"]), on="admission_id")
     assert len(paps) > 0
-    assert (paps["gender"] == "F").all() and (paps["age_at_adm"] >= 21).all()
+    assert (paps["sex_at_birth"] == "F").all() and (paps["age_at_adm"] >= 21).all()
 
 
 # ── occupancy ─────────────────────────────────────────────────────────────
@@ -239,3 +239,31 @@ def test_no_patient_is_admitted_while_still_in_an_earlier_stay(d):
     adm = _stays(d).sort_values(["patient_id", "admission_date", "admission_id"])
     prev_end = adm.groupby("patient_id")["end"].shift()
     assert not (prev_end > adm["admission_date"]).any()
+
+
+def test_sex_at_birth_is_recorded_and_agrees_with_gender_for_m_and_f(d):
+    p = d["patients"]
+    assert set(p["sex_at_birth"]) == {"M", "F"}
+    assert (p.loc[p["gender"] == "M", "sex_at_birth"] == "M").all()
+    assert (p.loc[p["gender"] == "F", "sex_at_birth"] == "F").all()
+    nb = p.loc[p["gender"] == "NB", "sex_at_birth"]
+    assert len(nb) > 0 and set(nb) == {"M", "F"}               # NB patients carry either
+
+
+def test_only_patients_born_female_are_admitted_to_ob_gyn_as_adults(d):
+    """Adults reach OB/GYN only if their sex at birth is F (adult men used to be routed there at random)."""
+    adm = d["admissions"].merge(d["patients"][["patient_id", "sex_at_birth", "age"]], on="patient_id")
+    adults = adm[(adm["department_id"] == "DEP-009") & (adm["age"] >= 18)]
+    assert len(adults) > 0
+    assert set(adults["sex_at_birth"]) == {"F"}
+
+
+def test_diagnoses_respect_sex_at_birth_for_every_gender(d):
+    """Sex-specific codes follow sex at birth, including for NB patients."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "data"))
+    from shared_rules import FEMALE_IMPOSSIBLE_CODES, MALE_IMPOSSIBLE_CODES
+    dx = d["dx"].merge(d["admissions"][["admission_id", "patient_id"]], on="admission_id")                 .merge(d["patients"][["patient_id", "gender", "sex_at_birth"]], on="patient_id")
+    assert not dx[(dx["sex_at_birth"] == "M")]["icd10_code"].isin(MALE_IMPOSSIBLE_CODES).any()
+    assert not dx[(dx["sex_at_birth"] == "F")]["icd10_code"].isin(FEMALE_IMPOSSIBLE_CODES).any()
+    assert (dx["gender"] == "NB").any()

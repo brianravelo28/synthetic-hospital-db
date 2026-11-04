@@ -71,16 +71,61 @@ def test_pool_pushes_admission_forward_when_nobody_in_dept_is_hired_yet():
 
 # ── diagnosis sampling ───────────────────────────────────────────────────
 
-@pytest.mark.parametrize("dept,gender,age,forbidden", [
-    ("OB/GYN", "M", 30, gen.MALE_IMPOSSIBLE_CODES),          # pool is almost all female-only
+@pytest.mark.parametrize("dept,sex_at_birth,age,forbidden", [
+    ("OB/GYN", "M", 0, gen.MALE_IMPOSSIBLE_CODES),           # a newborn boy born in OB/GYN
     ("Urology", "F", 40, gen.FEMALE_IMPOSSIBLE_CODES),
     ("Pediatrics", "F", 5, gen.NEWBORN_ONLY_CODES),
     ("Internal Medicine", "M", 80, gen.MALE_IMPOSSIBLE_CODES | gen.NEWBORN_ONLY_CODES),
 ])
-def test_diagnosis_sampling_never_returns_impossible_codes(dept, gender, age, forbidden):
+def test_diagnosis_sampling_never_returns_impossible_codes(dept, sex_at_birth, age, forbidden):
     np.random.seed(3)
     for _ in range(1500):
-        assert gen._sample_valid_diagnosis(dept, gender, age)["icd10_code"] not in forbidden
+        assert gen._sample_valid_diagnosis(dept, sex_at_birth, age)["icd10_code"] not in forbidden
+
+
+def test_impossible_codes_rule():
+    assert gen.impossible_codes("M", 30) == gen.MALE_IMPOSSIBLE_CODES | gen.NEWBORN_ONLY_CODES
+    assert gen.impossible_codes("F", 30) == gen.FEMALE_IMPOSSIBLE_CODES | gen.NEWBORN_ONLY_CODES
+    assert gen.impossible_codes("F", 0) == gen.FEMALE_IMPOSSIBLE_CODES      # newborn codes allowed at age 0
+    assert gen.impossible_codes("F", None) >= gen.NEWBORN_ONLY_CODES
+
+
+def test_sampling_raises_instead_of_leaving_the_department():
+    """There is no whole-catalog fallback: an exhausted department is an error."""
+    every_code = set(gen.sample_diagnosis.__globals__["get_diagnoses_df"]()["icd10_code"])
+    with pytest.raises(ValueError):
+        gen.sample_diagnosis("Cardiology", exclude=every_code)
+
+
+def _routable(dept_ids_by_name):
+    """Every (department name, sex at birth, age) the admission router in gen_admissions can produce."""
+    name = dept_ids_by_name
+    for g in ("M", "F"):                       # sex at birth
+        for d in gen.NEWBORN_DEPT_POOL:
+            yield name[d], g, 0
+        for d in gen.PEDIATRIC_DEPT_POOL:
+            for age in (1, 5, 17):
+                yield name[d], g, age
+        for d in name:
+            if d == "DEP-008" or (d in gen.FEMALE_ONLY_DEPTS and g != "F"):
+                continue
+            yield name[d], g, 30
+
+
+def test_every_routable_patient_has_an_allowed_diagnosis_in_their_department():
+    """The reason the fallback could be removed: no combination the router produces runs out of codes."""
+    names = {d["department_id"]: d["dep_name"] for d in gen.DEPARTMENTS_DATA}
+    combos = list(_routable(names))
+    assert len(combos) == 59         # 2 sexes x (2 newborn + 9 child + 18-19 adult department combinations)
+    for dept, g, age in combos:
+        dx = gen.sample_diagnosis(dept, exclude=gen.impossible_codes(g, age))   # raises if empty
+        assert dx["icd10_code"] not in gen.impossible_codes(g, age)
+
+
+def test_only_women_are_routed_to_ob_gyn_as_adults():
+    names = {d["department_id"]: d["dep_name"] for d in gen.DEPARTMENTS_DATA}
+    adults_in_obgyn = {g for dept, g, age in _routable(names) if dept == "OB/GYN" and age >= 18}
+    assert adults_in_obgyn == {"F"}
 
 
 # ── age-banded vitals stay inside what the validator calls plausible ─────

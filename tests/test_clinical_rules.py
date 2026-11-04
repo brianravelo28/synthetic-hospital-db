@@ -55,21 +55,21 @@ def _draw(fn, n=400, **ctx):
     return [fn(**ctx) for _ in range(n)]
 
 
-@pytest.mark.parametrize("gender,age", [("M", 30), ("F", 8), ("F", 60), ("NB", 25)])
-def test_deliveries_only_for_women_of_childbearing_age(gender, age):
-    picks = _draw(cr.pick_procedure, dx_codes=["O80", "O34.21"], gender=gender, age=age, all_procedure_ids=PROC_IDS)
+@pytest.mark.parametrize("sex_at_birth,age", [("M", 30), ("F", 8), ("F", 60)])
+def test_deliveries_only_for_women_of_childbearing_age(sex_at_birth, age):
+    picks = _draw(cr.pick_procedure, dx_codes=["O80", "O34.21"], sex_at_birth=sex_at_birth, age=age, all_procedure_ids=PROC_IDS)
     assert not set(picks) & set(cr.DELIVERY_PROCEDURES)
 
 
 def test_deliveries_do_happen_when_they_are_valid():
-    picks = _draw(cr.pick_procedure, dx_codes=["O80"], gender="F", age=28, all_procedure_ids=PROC_IDS)
+    picks = _draw(cr.pick_procedure, dx_codes=["O80"], sex_at_birth="F", age=28, all_procedure_ids=PROC_IDS)
     assert picks.count("PRC-021") > 250                         # most picks, the rest is general care
 
 
 @pytest.mark.parametrize("age", [0, 5, 17])
 def test_no_major_adult_surgery_on_minors(age):
     codes = ["I21.9", "M16.9", "M17.9", "S72.001A", "K35.80", "C50.919"]
-    picks = _draw(cr.pick_procedure, dx_codes=codes, gender="F", age=age, all_procedure_ids=PROC_IDS)
+    picks = _draw(cr.pick_procedure, dx_codes=codes, sex_at_birth="F", age=age, all_procedure_ids=PROC_IDS)
     assert not set(picks) & set(cr.ADULT_ONLY_PROCEDURES)
 
 
@@ -91,33 +91,33 @@ def test_insulin_and_metformin_need_a_diabetes_diagnosis():
 
 
 def test_type_1_diabetes_gets_insulin_not_metformin():
-    picks = _draw(cr.pick_medication, dx_codes=["E10.9"], gender="F", age=30, all_drug_names=DRUGS)
+    picks = _draw(cr.pick_medication, dx_codes=["E10.9"], sex_at_birth="F", age=30, all_drug_names=DRUGS)
     assert "Metformin" not in picks and any(p.startswith("Insulin") for p in picks)
 
 
 def test_pap_smear_only_for_women_21_and_over():
-    for gender, age in (("M", 40), ("F", 15), ("NB", 30)):
-        picks = _draw(cr.pick_test, dx_codes=["O09.90", "O20.0"], gender=gender, age=age, all_test_names=TEST_NAMES)
+    for sex_at_birth, age in (("M", 40), ("F", 15)):
+        picks = _draw(cr.pick_test, dx_codes=["O09.90", "O20.0"], sex_at_birth=sex_at_birth, age=age, all_test_names=TEST_NAMES)
         assert "Pap Smear" not in picks
-    adult = _draw(cr.pick_test, n=2000, dx_codes=["O09.90"], gender="F", age=30, all_test_names=TEST_NAMES)
+    adult = _draw(cr.pick_test, n=2000, dx_codes=["O09.90"], sex_at_birth="F", age=30, all_test_names=TEST_NAMES)
     assert "Pap Smear" in adult
 
 
 def test_young_children_do_not_get_adult_only_drugs():
     codes = ["I50.9", "F32.9", "S72.001A", "C18.9", "E11.9"]
-    picks = _draw(cr.pick_medication, n=800, dx_codes=codes, gender="M", age=5, all_drug_names=DRUGS)
+    picks = _draw(cr.pick_medication, n=800, dx_codes=codes, sex_at_birth="M", age=5, all_drug_names=DRUGS)
     assert not set(picks) & set(cr.NOT_FOR_YOUNG_CHILDREN)
 
 
 # ── treatments follow the diagnosis ──────────────────────────────────────
 
 def test_appendicitis_leads_to_appendectomy():
-    picks = _draw(cr.pick_procedure, dx_codes=["K35.80"], gender="M", age=30, all_procedure_ids=PROC_IDS)
+    picks = _draw(cr.pick_procedure, dx_codes=["K35.80"], sex_at_birth="M", age=30, all_procedure_ids=PROC_IDS)
     assert picks.count("PRC-009") / len(picks) > 0.7
 
 
 def test_general_share_keeps_some_unmatched_care():
-    picks = _draw(cr.pick_medication, n=3000, dx_codes=["I10"], gender="M", age=60, all_drug_names=DRUGS)
+    picks = _draw(cr.pick_medication, n=3000, dx_codes=["I10"], sex_at_birth="M", age=60, all_drug_names=DRUGS)
     off_family = [p for p in picks if p not in cr.FAMILY_MEDICATIONS["cardiac"]]
     assert 0.10 < len(off_family) / len(picks) < 0.30           # around GENERAL_SHARE
 

@@ -40,7 +40,12 @@ def test_every_care_level_can_step_down_to_a_room_every_department_has():
 def test_department_load_shares_sum_to_one_and_newborns_go_to_ob_and_pediatrics():
     assert sum(SHARES.values()) == pytest.approx(1.0)
     assert all(share > 0 for share in SHARES.values())
-    assert SHARES['DEP-009'] > SHARES['DEP-003']          # OB/GYN also receives the newborn share
+    # OB/GYN takes only female adults, plus its half of the newborns
+    newborn = sum(w for lo, hi, w in gen.AGE_BANDS if hi == 0)
+    children = sum(w for lo, hi, w in gen.AGE_BANDS if lo >= 1 and hi <= 17)
+    female_adults = (1 - newborn - children) * gen.PATIENT_GENDER_P[gen.PATIENT_GENDERS.index('F')]
+    assert SHARES['DEP-009'] == pytest.approx(newborn / 2 + female_adults / 19)
+    assert SHARES['DEP-009'] < SHARES['DEP-003']          # fewer than a department every adult can reach
 
 
 def test_expected_stay_matches_the_generator_draw():
@@ -212,9 +217,11 @@ def test_a_patient_still_in_hospital_cannot_be_admitted_again():
     for r in (current, later):
         r['patient_id'] = 'PAT-1'
     random.seed(11)
-    occ.allocate_rooms([current, later], rooms, NOW)
+    stats = occ.allocate_rooms([current, later], rooms, NOW)
     assert current['admission_status'] == 'Admitted'
     assert later['admission_status'] == 'Cancelled' and later['room_id'] is None
+    # every rate in the docs is quoted against the admissions that needed a bed: placed + cancelled
+    assert stats['needed_bed'] == stats['placed'] + stats['cancelled'] == 2
 
 
 def test_an_admission_with_no_bed_anywhere_in_time_is_cancelled_with_no_room():

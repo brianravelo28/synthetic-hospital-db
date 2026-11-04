@@ -237,12 +237,12 @@ WHERE dx.diagnosis_date < doc.hire_date;
 
 -- Q17: Diagnoses that contradict the patient's sex (should return no rows)
 -- Pregnancy codes (O...) and breast cancer (C50...) on male patients, prostate cancer (C61) on female patients.
-SELECT dx.diagnosis_id, dx.icd10_code, p.gender
+SELECT dx.diagnosis_id, dx.icd10_code, p.sex_at_birth
 FROM diagnoses dx
 JOIN admissions a ON a.admission_id = dx.admission_id
 JOIN patients p   ON p.patient_id   = a.patient_id
-WHERE (p.gender = 'M' AND (dx.icd10_code LIKE 'O%' OR dx.icd10_code LIKE 'C50%'))
-   OR (p.gender = 'F' AND dx.icd10_code LIKE 'C61%');
+WHERE (p.sex_at_birth = 'M' AND (dx.icd10_code LIKE 'O%' OR dx.icd10_code LIKE 'C50%'))
+   OR (p.sex_at_birth = 'F' AND dx.icd10_code LIKE 'C61%');
 
 -- Q18: Rooms holding more patients at once than they have beds (should return no rows)
 SELECT a.admission_id, a.room_id, a.admission_date

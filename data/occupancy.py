@@ -192,6 +192,7 @@ def allocate_rooms(rows: list, rooms: list, now, max_wait=timedelta(hours=MAX_BE
 
     stats = {'placed': 0, 'waited': 0, 'wait_hours': 0.0, 'lowered': 0, 'cancelled': 0, 'patient_moved': 0}
     happened = [r for r in rows if r['admission_status'] in ('Admitted', 'Discharged')]
+    stats['needed_bed'] = len(happened)     # the base for every rate: admissions that needed a bed (placed + cancelled)
     for row in sorted(happened, key=lambda r: r['admission_date']):
         row['_open'] = row['admission_status'] == 'Admitted' or row['discharge_date'] is None
         row['_duration'] = timedelta(days=row['_planned_days'])

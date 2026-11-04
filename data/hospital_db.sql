@@ -137,7 +137,8 @@ CREATE TABLE patients (
     ssn                 VARCHAR(11)     NOT NULL        COMMENT 'Format: XXX-XX-XXXX',
     birth_date          DATE            NOT NULL,
     age                 TINYINT         NOT NULL,
-    gender              ENUM('M','F','NB')  NOT NULL,
+    gender              ENUM('M','F','NB')  NOT NULL        COMMENT 'Gender identity',
+    sex_at_birth        ENUM('M','F')   NOT NULL        COMMENT 'Sex assigned at birth; the sex-specific clinical rules use this, not gender',
     blood_type          ENUM(
                             'A+','A-',
                             'B+','B-',

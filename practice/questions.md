@@ -33,7 +33,7 @@ A few things to know before you start:
 
 1. **How many admissions does each department have?** Show the busiest first. *(joins · `GROUP BY` · `COUNT`)*
 2. **Which ten patients have the most admissions?** *(`ORDER BY` · `LIMIT`)*
-3. **How many patients are in each age band, by sex?** Use the bands 0–17, 18–39, 40–64 and 65+. *(`CASE` · `GROUP BY`)*
+3. **How many patients are in each age band, by gender?** Use the bands 0–17, 18–39, 40–64 and 65+. *(`CASE` · `GROUP BY`)*
 
 ## Joins and dates
 
@@ -58,7 +58,7 @@ The pipeline that built this data runs checks like these. Each of the next four 
 
 15. Find admissions whose discharge date is before their admission date.
 16. Find diagnoses dated before the hire date of the doctor who made them.
-17. Find diagnoses that contradict the patient's sex: pregnancy codes (`O…`) or breast cancer (`C50…`) on a male patient, prostate cancer (`C61`) on a female patient.
+17. Find diagnoses that contradict the patient's sex at birth (`patients.sex_at_birth`): pregnancy codes (`O…`) or breast cancer (`C50…`) on a patient born male, prostate cancer (`C61`) on a patient born female.
 18. Find stays in a room that held more patients at once than the room has beds. *(a correlated subquery or a self-join on overlapping dates)* — *Hint: for each admission, count the admissions in the same room (including this one) that had started and not yet ended at the moment this one started. A stay that ends at the exact moment another one starts does not overlap it: the bed is free.*
 
 ---

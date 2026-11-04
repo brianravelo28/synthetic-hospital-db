@@ -147,53 +147,53 @@ def _unique(seq):
     return list(dict.fromkeys(seq))                         # stable, hash-seed independent
 
 
-def _eligible_procedure(proc_id: str, gender: str, age: int) -> bool:
+def _eligible_procedure(proc_id: str, sex_at_birth: str, age: int) -> bool:
     if proc_id in DELIVERY_PROCEDURES:
-        return gender == "F" and DELIVERY_AGE_RANGE[0] <= age <= DELIVERY_AGE_RANGE[1]
+        return sex_at_birth == "F" and DELIVERY_AGE_RANGE[0] <= age <= DELIVERY_AGE_RANGE[1]
     if proc_id in ADULT_ONLY_PROCEDURES:
         return age >= ADULT_AGE
     return True
 
 
-def _eligible_medication(drug: str, gender: str, age: int) -> bool:
+def _eligible_medication(drug: str, sex_at_birth: str, age: int) -> bool:
     return not (age < YOUNG_CHILD_AGE and drug in NOT_FOR_YOUNG_CHILDREN)
 
 
-def _eligible_test(test: str, gender: str, age: int) -> bool:
+def _eligible_test(test: str, sex_at_birth: str, age: int) -> bool:
     if test == "Pap Smear":
-        return gender == "F" and age >= PAP_SMEAR_MIN_AGE
+        return sex_at_birth == "F" and age >= PAP_SMEAR_MIN_AGE
     return True
 
 
-def _pool(kind: str, dx_codes, code_map, family_map, eligible, gender, age):
+def _pool(kind: str, dx_codes, code_map, family_map, eligible, sex_at_birth, age):
     pool = []
     for code in dx_codes:
         pool.extend(code_map[code] if code in code_map else family_map.get(family_of(code), []))
-    return [x for x in _unique(pool) if eligible(x, gender, age)]
+    return [x for x in _unique(pool) if eligible(x, sex_at_birth, age)]
 
 
-def _pick(kind, dx_codes, code_map, family_map, eligible, gender, age, everything):
-    pool = _pool(kind, dx_codes, code_map, family_map, eligible, gender, age)
+def _pick(kind, dx_codes, code_map, family_map, eligible, sex_at_birth, age, everything):
+    pool = _pool(kind, dx_codes, code_map, family_map, eligible, sex_at_birth, age)
     if not pool or random.random() < GENERAL_SHARE:
-        pool = [x for x in family_map["general"] if eligible(x, gender, age)]
+        pool = [x for x in family_map["general"] if eligible(x, sex_at_birth, age)]
     if not pool:                                             # nothing eligible: any eligible catalog item
-        pool = [x for x in everything if eligible(x, gender, age)]
+        pool = [x for x in everything if eligible(x, sex_at_birth, age)]
     return random.choice(pool)
 
 
-def pick_procedure(dx_codes, gender, age, all_procedure_ids, emergency=False) -> str:
+def pick_procedure(dx_codes, sex_at_birth, age, all_procedure_ids, emergency=False) -> str:
     """One procedure id suited to the admission's diagnoses and the patient."""
-    if emergency and random.random() < 0.10 and _eligible_procedure("PRC-001", gender, age):
+    if emergency and random.random() < 0.10 and _eligible_procedure("PRC-001", sex_at_birth, age):
         return "PRC-001"                                      # emergency department visit
     return _pick("procedure", dx_codes, CODE_PROCEDURES, FAMILY_PROCEDURES,
-                 _eligible_procedure, gender, age, all_procedure_ids)
+                 _eligible_procedure, sex_at_birth, age, all_procedure_ids)
 
 
-def pick_medication(dx_codes, gender, age, all_drug_names) -> str:
+def pick_medication(dx_codes, sex_at_birth, age, all_drug_names) -> str:
     return _pick("medication", dx_codes, CODE_MEDICATIONS, FAMILY_MEDICATIONS,
-                 _eligible_medication, gender, age, all_drug_names)
+                 _eligible_medication, sex_at_birth, age, all_drug_names)
 
 
-def pick_test(dx_codes, gender, age, all_test_names) -> str:
+def pick_test(dx_codes, sex_at_birth, age, all_test_names) -> str:
     return _pick("test", dx_codes, {}, FAMILY_TESTS,
-                 _eligible_test, gender, age, all_test_names)
+                 _eligible_test, sex_at_birth, age, all_test_names)

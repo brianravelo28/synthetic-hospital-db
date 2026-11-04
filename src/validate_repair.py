@@ -11,7 +11,7 @@ Rule groups (executed in sequence):
     2. Age-based         — newborn, pediatric, geriatric rules
     3. Admission type    — ESI scores, scheduled record cleanup
     4. Department        — doctor/room/condition alignment
-    5. Diagnosis         — gender-impossible codes, dept alignment
+    5. Diagnosis         — sex-impossible codes, dept alignment
     6. Financial         — amount reconciliation, payment logic
 
 Usage (Jupyter):
@@ -42,7 +42,7 @@ from collections import defaultdict
 from icd10_diagnoses import sample_diagnosis, get_diagnoses_for_department
 from shared_rules import (
     AS_OF, AS_OF_SQL, CONDITION_ROOM_MAP, FEMALE_IMPOSSIBLE_CODES, MALE_IMPOSSIBLE_CODES,
-    NEWBORN_ONLY_CODES, OB_NEWBORN_DEPTS, PAYER_COVERAGE,
+    NEWBORN_ONLY_CODES, OB_NEWBORN_DEPTS, PAYER_COVERAGE, impossible_codes,
 )
 
 REPAIR_SEED = 42      # repair is deterministic: the same data always gets the same fixes
@@ -762,13 +762,13 @@ def validate_diagnoses(conn) -> dict:
             SELECT COUNT(*) FROM diagnoses d
             JOIN admissions a ON d.admission_id = a.admission_id
             JOIN patients p ON a.patient_id = p.patient_id
-            WHERE p.gender = 'M' AND d.icd10_code IN ({male_codes})
+            WHERE p.sex_at_birth = 'M' AND d.icd10_code IN ({male_codes})
         """),
         'female_impossible_codes': _count(conn, f"""
             SELECT COUNT(*) FROM diagnoses d
             JOIN admissions a ON d.admission_id = a.admission_id
             JOIN patients p ON a.patient_id = p.patient_id
-            WHERE p.gender = 'F' AND d.icd10_code IN ({female_codes})
+            WHERE p.sex_at_birth = 'F' AND d.icd10_code IN ({female_codes})
         """),
         'newborn_codes_on_adults': _count(conn, f"""
             SELECT COUNT(*) FROM diagnoses d
@@ -786,7 +786,7 @@ def repair_diagnoses(conn):
 
     def resample_diagnoses(where_clause: str, params: dict = {}):
         result = conn.execute(text(f"""
-            SELECT d.diagnosis_id, a.department_id
+            SELECT d.diagnosis_id, a.department_id, p.sex_at_birth, p.age
             FROM diagnoses d
             JOIN admissions a ON d.admission_id = a.admission_id
             JOIN patients p ON a.patient_id = p.patient_id
@@ -794,29 +794,29 @@ def repair_diagnoses(conn):
         """), params)
         rows    = result.fetchall()
         updates = []
-        for row in rows:
-            dx_id, dept_id = row
+        for dx_id, dept_id, sex_at_birth, age in rows:
             dept_name = dept_map.get(dept_id, 'Internal Medicine')
-            new_dx    = sample_diagnosis(dept_name)
-            # Resample until we get a code that isn't in any impossible set
-            attempts = 0
-            while (new_dx['icd10_code'] in MALE_IMPOSSIBLE_CODES
-                   or new_dx['icd10_code'] in FEMALE_IMPOSSIBLE_CODES
-                   or new_dx['icd10_code'] in NEWBORN_ONLY_CODES) and attempts < 10:
-                new_dx   = sample_diagnosis(dept_name)
-                attempts += 1
+            forbidden = impossible_codes(sex_at_birth, age)
+            try:
+                new_dx = sample_diagnosis(dept_name, exclude=forbidden)
+            except ValueError:
+                # the department has no allowed code for this patient: use the whole catalog
+                new_dx = sample_diagnosis(exclude=forbidden)
+                outside_dept.append(dx_id)
             updates.append({
                 "diagnosis_id": dx_id,
                 "icd10_code":   new_dx['icd10_code']
             })
         return updates
 
+    outside_dept = []                    # replacements that had to come from another department's codes
+
     male_codes    = "'" + "','".join(MALE_IMPOSSIBLE_CODES)   + "'"
     female_codes  = "'" + "','".join(FEMALE_IMPOSSIBLE_CODES) + "'"
     newborn_codes = "'" + "','".join(NEWBORN_ONLY_CODES)      + "'"
 
-    u1 = resample_diagnoses(f"p.gender = 'M' AND d.icd10_code IN ({male_codes})")
-    u2 = resample_diagnoses(f"p.gender = 'F' AND d.icd10_code IN ({female_codes})")
+    u1 = resample_diagnoses(f"p.sex_at_birth = 'M' AND d.icd10_code IN ({male_codes})")
+    u2 = resample_diagnoses(f"p.sex_at_birth = 'F' AND d.icd10_code IN ({female_codes})")
     u3 = resample_diagnoses(f"p.age > 1 AND d.icd10_code IN ({newborn_codes})")
 
     all_updates = u1 + u2 + u3
@@ -828,6 +828,9 @@ def repair_diagnoses(conn):
     print(f"    Resampled {len(u1)} male-impossible, "
           f"{len(u2)} female-impossible, "
           f"{len(u3)} newborn-on-adult diagnoses")
+    if outside_dept:
+        print(f"    {len(outside_dept)} replacements came from outside the admission's department "
+              f"(no allowed code in it)")
     print("    Group 5 complete.")
 
 
@@ -1077,7 +1080,7 @@ def validate_clinical_coherence(conn) -> dict:
             JOIN admissions a  ON a.admission_id  = pp.admission_id
             JOIN patients p    ON p.patient_id    = a.patient_id
             WHERE {delivery}
-              AND (p.gender <> 'F' OR {age_at_adm} NOT BETWEEN 12 AND 55)
+              AND (p.sex_at_birth <> 'F' OR {age_at_adm} NOT BETWEEN 12 AND 55)
         """),
         'delivery_without_obstetric_dx': _count(conn, f"""
             SELECT COUNT(*) FROM patient_procedures pp
@@ -1111,7 +1114,7 @@ def validate_clinical_coherence(conn) -> dict:
             SELECT COUNT(*) FROM medical_tests t
             JOIN admissions a ON a.admission_id = t.admission_id
             JOIN patients p   ON p.patient_id   = a.patient_id
-            WHERE t.test_name = 'Pap Smear' AND (p.gender <> 'F' OR {age_at_adm} < 21)
+            WHERE t.test_name = 'Pap Smear' AND (p.sex_at_birth <> 'F' OR {age_at_adm} < 21)
         """),
     }
 

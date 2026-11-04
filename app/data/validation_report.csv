@@ -11,7 +11,7 @@ group1_temporal,Group 1 — Temporal,bill_before_discharge,0,0
 group1_temporal,Group 1 — Temporal,payment_before_bill,0,0
 group2_age,Group 2 — Age-based,newborn_wrong_age,0,0
 group2_age,Group 2 — Age-based,newborn_wrong_dept,0,0
-group2_age,Group 2 — Age-based,newborn_wrong_registered_date,70,0
+group2_age,Group 2 — Age-based,newborn_wrong_registered_date,71,0
 group2_age,Group 2 — Age-based,pediatric_in_geriatric_dept,0,0
 group2_age,Group 2 — Age-based,adult_in_pediatric_dept,0,0
 group2_age,Group 2 — Age-based,geriatric_newborn_diagnosis,0,0
