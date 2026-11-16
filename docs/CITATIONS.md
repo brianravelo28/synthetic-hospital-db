@@ -9,7 +9,7 @@
 | Part | Basis |
 |---|---|
 | **Table and field layout** | Follows published hospital-database designs (next section). |
-| **Codes and scales** | Real ICD-10-CM diagnosis codes, CPT-style procedure codes (format only) and the Emergency Severity Index triage scale. |
+| **Codes and scales** | Real ICD-10-CM diagnosis codes, real CPT procedure code numbers (with names written for this project) and the Emergency Severity Index triage scale. |
 | **Every number and proportion** | Random draws from settings the author chose. None is measured from real hospitals. See "Numbers and proportions" below. |
 | **The 59 checks** | Rules the author wrote. They test that the tables agree with each other, not that the data is clinically realistic. |
 
@@ -29,7 +29,7 @@ The choice of tables and fields (patients, doctors, nurses, departments, rooms, 
 These make the data look like hospital data. They are not sourced from real records.
 
 - **ICD-10-CM** (diagnosis coding): [CDC/NCHS ICD-10-CM overview](https://www.cdc.gov/nchs/icd/icd-10-cm.htm). `data/icd10_diagnoses.py` hand-curates 66 real ICD-10-CM codes. The *codes* are real; the weights and the records that use them are not (see below).
-- **CPT-style procedure codes**: [AMA CPT overview](https://www.ama-assn.org/practice-management/cpt). `data/hospital_generator.py`'s procedure catalog mimics CPT code formatting for realism only; it is not licensed CPT content and is not a billing reference.
+- **CPT** (procedure coding): [AMA CPT overview](https://www.ama-assn.org/practice-management/cpt). The 30 procedures in `app/data/procedures.csv` use real CPT code numbers (for example 99283, 33533, 44950) with names written for this project; the AMA's descriptors are not reproduced. CPT is copyrighted by the American Medical Association, and this project holds no licence from it. The catalog and its charges are not a billing reference.
 - **Emergency Severity Index (ESI)**: the published five-level triage scale (1 most urgent, 5 least) used for triage acuity. The levels are real; how often each occurs here is hand-set.
 - **HIPAA Safe Harbor de-identification** ([HHS guidance](https://www.hhs.gov/hipaa/for-professionals/privacy/special-topics/de-identification/index.html)): informed the general shape of what fields a hospital dataset "should" contain, as a design reference. This project makes no claim of HIPAA compliance, since there is no real data to be compliant *about*.
 

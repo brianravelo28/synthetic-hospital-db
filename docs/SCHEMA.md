@@ -46,7 +46,7 @@ erDiagram
 |---|---|---|
 | `departments` | `department_id` (PK), `dep_name`, `floor_number`, `bed_capacity` | 20 fixed departments. Referenced by almost every other table. `bed_capacity` is the number of inpatient beds, set by the generator to the sum of the beds in the department's inpatient rooms. |
 | `payers` | `payer_id` (PK), `payer_name`, `payer_type` (ENUM), `contact_phone` | 10 payers across 6 `payer_type` values (Medicare, Medicaid, Private Insurance, Self-Pay, Workers Compensation, CHIP), each with a fixed coverage rate in the generator/repair scripts. |
-| `procedures` | `procedure_id` (PK), `procedure_code`, `procedure_name`, `department_id` (FK), `base_cost`, `duration_minutes` | 30-procedure catalog, CPT-style codes. |
+| `procedures` | `procedure_id` (PK), `procedure_code`, `procedure_name`, `department_id` (FK), `base_cost`, `duration_minutes` | 30-procedure catalog with real CPT code numbers and names written for this project ([CITATIONS](CITATIONS.md)). |
 
 ## Domain 2 — Staff & facilities
 

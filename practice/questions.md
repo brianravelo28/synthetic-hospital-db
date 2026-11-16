@@ -63,4 +63,4 @@ The pipeline that built this data runs checks like these. Each of the next four 
 
 ---
 
-After the questions, [`notebooks/03_sql_analysis.ipynb`](../notebooks/03_sql_analysis.ipynb) has more worked SQL examples, with the answers shown beside each question.
+After the questions, [`notebooks/sql_analysis.ipynb`](../notebooks/sql_analysis.ipynb) has more worked SQL examples, with the answers shown beside each question.
