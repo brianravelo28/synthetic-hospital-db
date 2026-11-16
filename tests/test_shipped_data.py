@@ -58,11 +58,10 @@ def test_foreign_keys_resolve(d):
     assert set(d["admissions"]["admitting_doctor_id"]) <= set(d["doctors"]["doctor_id"])
 
 
-def test_recorded_validation_run_is_clean_apart_from_room_scarcity(d):
+def test_recorded_validation_run_is_clean_after_repair(d):
     r = d["report"]
     assert len(r) == 59
-    leftover = r[r["after_repair"] > 0]
-    assert set(leftover["rule"]) <= {"condition_room_mismatch"}
+    assert r["after_repair"].sum() == 0, r[r["after_repair"] > 0]["rule"].tolist()
 
 
 def test_census_is_small_and_recent(d):

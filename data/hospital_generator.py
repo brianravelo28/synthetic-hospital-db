@@ -351,6 +351,9 @@ CHIEF_COMPLAINTS = [
 NEWBORN_DEPT_POOL   = sorted(OB_NEWBORN_DEPTS)
 PEDIATRIC_DEPT_POOL = ['DEP-008', 'DEP-001', 'DEP-002']
 
+# The allocator's counts for the latest gen_admissions run (read by src/run_pipeline.py for the occupancy summary).
+ALLOCATION_STATS = {}
+
 # Gender identity of patients (hand-set proportions). Sex at birth is stored separately and drives the
 # sex-specific clinical rules: it equals gender for M and F, and is drawn 50/50 for NB. Adults go to
 # OB/GYN only if their sex at birth is F.
@@ -982,6 +985,8 @@ def gen_admissions(conn, cfg: dict, patient_ids: list, dept_ids: list,
              for r in conn.execute(text(
                  "SELECT room_id, department_id, room_type, bed_capacity FROM rooms ORDER BY room_id"))]
     stats = allocate_rooms(rows, rooms, now)
+    ALLOCATION_STATS.clear()
+    ALLOCATION_STATS.update(stats)
     mean_wait = stats['wait_hours'] / stats['waited'] if stats['waited'] else 0.0
     n = stats['needed_bed'] or 1
     print(f"    rooms assigned to {stats['needed_bed']} admissions that needed a bed: {stats['placed']} placed; "

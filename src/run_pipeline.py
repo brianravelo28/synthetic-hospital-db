@@ -34,7 +34,9 @@ sys.path.insert(0, str(ROOT / "src"))
 import hospital_generator as gen      # noqa: E402
 from shared_rules import AS_OF        # noqa: E402
 import validate_repair as vr          # noqa: E402
-from export_to_csv import export      # noqa: E402
+from export_to_csv import export, TABLES      # noqa: E402
+from run_summary import occupancy_summary, write_checksums      # noqa: E402
+import pandas as pd                   # noqa: E402
 from sqlalchemy import create_engine  # noqa: E402
 
 
@@ -85,6 +87,12 @@ def run(size: str, export_dir: Path, report_path: Path, do_export: bool,
             "before_repair": b["count"], "after_repair": r["count"],
         })
 
+    with engine.connect() as conn:
+        adm = pd.read_sql("SELECT admission_id, room_id, admission_date, discharge_date, admission_status, "
+                          "patient_condition FROM admissions", conn, parse_dates=["admission_date", "discharge_date"])
+        rooms = pd.read_sql("SELECT room_id, room_type, bed_capacity FROM rooms", conn)
+    occupancy = occupancy_summary(adm, rooms, AS_OF, dict(gen.ALLOCATION_STATS))
+
     report_path.parent.mkdir(parents=True, exist_ok=True)
     with open(report_path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=["group", "group_label", "rule", "before_repair", "after_repair"])
@@ -102,6 +110,8 @@ def run(size: str, export_dir: Path, report_path: Path, do_export: bool,
     }
     with open(report_path.with_name(report_path.stem + "_meta.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
+    with open(report_path.with_name(report_path.stem + "_occupancy.json"), "w", encoding="utf-8") as f:
+        json.dump(occupancy, f, indent=2)
     print(f"\nWrote {report_path} ({len(out_rows)} checks)")
 
     if summary_path:
@@ -111,6 +121,8 @@ def run(size: str, export_dir: Path, report_path: Path, do_export: bool,
     if do_export:
         print("\n--- Exporting CSVs ---")
         export(export_dir, url=vr.DB_URL)
+        write_checksums(export_dir, TABLES + ["icd10_lookup"])
+        print(f"Wrote {export_dir / 'checksums.json'}")
     return meta
 
 

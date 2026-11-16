@@ -35,6 +35,16 @@ def result(tmp_path_factory):
     return {"meta": meta, "out": out, "report": pd.read_csv(out / "report.csv")}
 
 
+def test_the_run_writes_its_occupancy_summary_and_data_checksums(result):
+    import json
+    occupancy = json.loads((result["out"] / "report_occupancy.json").read_text(encoding="utf-8"))
+    a = occupancy["allocation"]
+    assert a["needed_bed"] == a["placed"] + a["cancelled_for_no_bed"] > 0
+    assert occupancy["inpatient_beds"] == sum(occupancy["beds_by_type"].values())
+    manifest = json.loads((result["out"] / "csv" / "checksums.json").read_text(encoding="utf-8"))
+    assert manifest["algorithm"] == "sha256" and len(manifest["files"]) == 18
+
+
 def test_all_59_checks_ran(result):
     assert result["meta"]["checks"] == len(result["report"]) == 59
 
@@ -52,10 +62,9 @@ def test_treatments_fit_the_patient_and_diagnosis_before_any_repair(result):
     assert r.loc[r["group"] == "group8_clinical", "before_repair"].sum() == 0
 
 
-def test_repair_leaves_only_room_scarcity(result):
+def test_repair_leaves_no_violations(result):
     r = result["report"]
-    leftover = r[r["after_repair"] > 0]
-    assert set(leftover["rule"]) <= {"condition_room_mismatch"}
+    assert r["after_repair"].sum() == 0, r[r["after_repair"] > 0]["rule"].tolist()
 
 
 def test_realism_checks_pass_on_fresh_data(result):
