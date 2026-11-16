@@ -59,7 +59,7 @@ One admission is one row of `admissions`. The CSVs in `app/data/` come from one 
 
 ## Run it
 
-Python 3.11 to 3.13.
+Python 3.11 to 3.14.
 
 ```bash
 git clone https://github.com/brianravelo28/synthetic-hospital-db.git
@@ -78,7 +78,7 @@ python src/run_pipeline.py --size large     # or small / medium
 
 ## Tests
 
-The tests check that the generated data obeys its rules, that the quoted figures recompute from the committed files, that the same inputs give the same output, and that each check can fail. Over 220 tests; those without a database run in under two minutes, and 73 integration tests run the whole pipeline against MariaDB (they regenerate the database, so they run only when `HOSPITAL_DB_URL` is set to a scratch database). They do not cover page layout or the live deployment. GitHub Actions runs them on every push: the tests without a database on Python 3.11, 3.12 and 3.13, and the integration tests on Python 3.11 and 3.13 against MariaDB 10.4 and 10.11.
+The tests check that the generated data obeys its rules, that the quoted figures recompute from the committed files, that the same inputs give the same output, and that each check can fail. Over 220 tests; those without a database run in under two minutes, and 73 integration tests run the whole pipeline against MariaDB (they regenerate the database, so they run only when `HOSPITAL_DB_URL` is set to a scratch database). They do not cover page layout or the live deployment. GitHub Actions runs them on every push: the tests without a database on Python 3.11, 3.12, 3.13 and 3.14, and the integration tests on Python 3.11, 3.13 and 3.14 against MariaDB 10.4 and 10.11.
 
 ```bash
 pip install -r requirements-dev.txt

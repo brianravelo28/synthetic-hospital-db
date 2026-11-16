@@ -207,7 +207,7 @@ Some waiting is unavoidable at a realistic occupancy. Small and medium stay spar
 
 **Data version.** `app/data/checksums.json` holds the SHA-256 of each of the 18 CSVs; a test checks them. A generator change that moves the random stream changes rows that follow it: the round-five change moved the stream before staff are generated, so the four staff files changed (every row), which the checksums make visible.
 
-**Software.** Python 3.11 to 3.13 (CI). Dependencies are pinned exactly in `requirements.txt` and `app/requirements.txt`: SQLAlchemy 2.1.7, PyMySQL 1.2.3, Faker 40.43.0, NumPy 2.4.6, pandas 3.1.0, Streamlit 1.66.1, Plotly 7.1.0. NumPy 2.5 needs Python 3.12 or later and is not applied. The integration tests run on MariaDB 10.4 (end of life June 2024; what XAMPP ships) and 10.11.
+**Software.** Python 3.11 to 3.14 (CI). Dependencies are pinned exactly in `requirements.txt` and `app/requirements.txt`: SQLAlchemy 2.1.7, PyMySQL 1.2.3, Faker 40.43.0, NumPy 2.4.6, pandas 3.1.0, Streamlit 1.66.1, Plotly 7.1.0. NumPy 2.5 needs Python 3.12 or later and is not applied. The integration tests run on MariaDB 10.4 (end of life June 2024; what XAMPP ships) and 10.11.
 
 **Tests.** `tests/` runs without a database except the integration tests, which regenerate the target database and run only when `HOSPITAL_DB_URL` is set.
 
@@ -221,11 +221,11 @@ Some waiting is unavoidable at a realistic occupancy. Small and medium stay spar
 - `test_pipeline_integration.py`: all 59 checks run; groups 3, 6 and 8 and the room and patient-overlap checks are clean before repair; the pinned date gives identical tables and a different date different tables; repair twice changes nothing; the run writes its occupancy summary and checksums.
 - `test_rules_fire.py`: one injected violation per rule (see The 59 checks).
 - `test_doc_figures.py`: every figure the README and this document quote is recomputed from the committed files; the test names the sentence that no longer matches.
-- `.github/workflows/ci.yml`: the tests without a database on Python 3.11, 3.12 and 3.13; the integration tests on Python 3.11 and 3.13, each against MariaDB 10.4 and 10.11.
+- `.github/workflows/ci.yml`: the tests without a database on Python 3.11, 3.12, 3.13 and 3.14; the integration tests on Python 3.11, 3.13 and 3.14, each against MariaDB 10.4 and 10.11.
 
 ## Deployment notes
 
-The dashboard runs on Streamlit Community Cloud (free tier): repository `brianravelo28/synthetic-hospital-db`, branch `main`, main file `app/app.py`, requirements `app/requirements.txt`. The app runs on Python 3.14, which is chosen in the app's settings on Streamlit Community Cloud, not in the repository (read there on 2026-11-16). CI covers Python 3.11 to 3.13, not 3.14; the 156 tests that need no database were run once on Python 3.14.7 locally and passed, and the dashboard pages were not re-rendered on 3.14. A push to `main` redeploys. The app sleeps when idle and took about two minutes to wake after a rebuild (observed 2026-11-03). It reads only the committed CSVs in `app/data/`, never a database. Memory use on the host is not measured. Layout and colour decisions are in [DASHBOARD.md](DASHBOARD.md).
+The dashboard runs on Streamlit Community Cloud (free tier): repository `brianravelo28/synthetic-hospital-db`, branch `main`, main file `app/app.py`, requirements `app/requirements.txt`. The app runs on Python 3.14, which is chosen in the app's settings on Streamlit Community Cloud, not in the repository (read there on 2026-11-16). CI covers Python 3.14 as well as 3.11 to 3.13, so the deployed version is tested; the dashboard pages are not rendered in CI. A push to `main` redeploys. The app sleeps when idle and took about two minutes to wake after a rebuild (observed 2026-11-03). It reads only the committed CSVs in `app/data/`, never a database. Memory use on the host is not measured. Layout and colour decisions are in [DASHBOARD.md](DASHBOARD.md).
 
 ## Known limitations
 

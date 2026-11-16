@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.11", "3.12", "3.13"]
+        python: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -30,7 +30,7 @@ jobs:
         # 10.4 is what the project was developed on (XAMPP) and is past end of life (June 2024);
         # 10.11 is a supported long-term release.
         mariadb: ["10.4", "10.11"]
-        python: ["3.11", "3.13"]
+        python: ["3.11", "3.13", "3.14"]
     services:
       mariadb:
         image: mariadb:${{ matrix.mariadb }}

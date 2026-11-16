@@ -116,7 +116,7 @@ def readme_needles(f):
         f"At large size {n(a['waited'])} admissions ({pct(a['pct_of_needed_bed']['waited'])}) waited for a bed, for a mean of "
         f"{half_up(a['mean_wait_hours'])} hours",
         f"Bed occupancy is {pct(S['average_occupancy_pct'], 0)} at small and {pct(M['average_occupancy_pct'], 0)} at medium",
-        "Python 3.11 to 3.13",
+        "Python 3.11 to 3.14",
     ]
 
 
