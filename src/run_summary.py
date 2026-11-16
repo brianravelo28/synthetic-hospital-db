@@ -94,11 +94,14 @@ def occupancy_summary(admissions: pd.DataFrame, rooms: pd.DataFrame, as_of, allo
 
 
 def file_sha256(path: Path) -> str:
-    h = hashlib.sha256()
+    """SHA-256 of the file with CRLF line endings read as LF.
+
+    Git stores these CSVs with LF but a Windows checkout (core.autocrlf) converts them to CRLF;
+    hashing the raw bytes would give a different value on each platform for the same data.
+    """
     with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
+        data = f.read().replace(b"\r\n", b"\n")
+    return hashlib.sha256(data).hexdigest()
 
 
 def write_checksums(data_dir: Path, names: list) -> dict:
