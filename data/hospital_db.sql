@@ -92,7 +92,7 @@ COMMENT = 'Insurance companies and payer types';
 -- procedures
 -- Procedure catalog — the menu of services the hospital offers.
 -- Acts as a lookup table for patient_procedures and billing_line_items.
--- procedure_code mimics CPT (Current Procedural Terminology) format.
+-- procedure_code holds real CPT (Current Procedural Terminology) code numbers; names are written for this project.
 -- base_cost is the list price before insurance negotiation.
 -- -----------------------------------------------------------------------------
 CREATE TABLE procedures (
@@ -115,7 +115,7 @@ CREATE TABLE procedures (
 ENGINE = InnoDB
 DEFAULT CHARSET = utf8mb4
 COLLATE = utf8mb4_unicode_ci
-COMMENT = 'Hospital procedure catalog with CPT-style codes';
+COMMENT = 'Hospital procedure catalog with CPT code numbers';
 
 
 -- =============================================================================
