@@ -225,7 +225,7 @@ Some waiting is unavoidable at a realistic occupancy. Small and medium stay spar
 
 ## Deployment notes
 
-The dashboard runs on Streamlit Community Cloud (free tier): repository `brianravelo28/synthetic-hospital-db`, branch `main`, main file `app/app.py`, requirements `app/requirements.txt`. The Python version is chosen in the app's Advanced settings, not in the repository. A push to `main` redeploys. The app sleeps when idle and took about two minutes to wake after a rebuild (observed 2026-11-03). It reads only the committed CSVs in `app/data/`, never a database. Memory use on the host is not measured. Layout and colour decisions are in [DASHBOARD.md](DASHBOARD.md).
+The dashboard runs on Streamlit Community Cloud (free tier): repository `brianravelo28/synthetic-hospital-db`, branch `main`, main file `app/app.py`, requirements `app/requirements.txt`. The app runs on Python 3.14, which is chosen in the app's settings on Streamlit Community Cloud, not in the repository (read there on 2026-11-16). CI covers Python 3.11 to 3.13, not 3.14; the 156 tests that need no database were run once on Python 3.14.7 locally and passed, and the dashboard pages were not re-rendered on 3.14. A push to `main` redeploys. The app sleeps when idle and took about two minutes to wake after a rebuild (observed 2026-11-03). It reads only the committed CSVs in `app/data/`, never a database. Memory use on the host is not measured. Layout and colour decisions are in [DASHBOARD.md](DASHBOARD.md).
 
 ## Known limitations
 
