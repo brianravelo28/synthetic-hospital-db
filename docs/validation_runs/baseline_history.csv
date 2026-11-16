@@ -1,0 +1,14 @@
+figure,value,source_commit,definition
+six_year_admissions,12000.0,94b2de2,rows in admissions.csv
+six_year_span_years,6.8,94b2de2,years from the first to the last stay that happened
+six_year_rooms,560.0,94b2de2,rows in rooms.csv
+six_year_department_bed_capacity,338.0,94b2de2,sum of departments.bed_capacity
+six_year_average_census,20.3,94b2de2,"patients in an inpatient bed at midnight, averaged after a 45-day warm-up"
+six_year_average_occupancy_pct,6.0,94b2de2,average census over departments.bed_capacity
+six_year_overlapping_stays,37.0,94b2de2,stays that begin while the same patient is in an earlier stay
+six_year_overlapping_stays_pct_of_stays,0.34,94b2de2,overlapping stays as a share of stays that happened
+before_sex_at_birth_adult_obgyn_admissions_not_recorded_F,251.0,c2205fe,admissions to OB/GYN (DEP-009) of patients aged 18 or more whose gender is not F
+before_sex_at_birth_adult_obgyn_stays_not_recorded_F,228.0,c2205fe,"the same, for admissions that happened"
+before_sex_at_birth_nb_patients,318.0,c2205fe,patients with gender NB
+before_sex_at_birth_nb_diagnoses,961.0,c2205fe,diagnosis rows of NB patients
+before_sex_at_birth_nb_diagnoses_with_sex_specific_code,54.0,c2205fe,"of those, rows carrying a male-only or a female-only code (shared_rules.py)"

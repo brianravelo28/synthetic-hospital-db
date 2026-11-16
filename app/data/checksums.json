@@ -1,0 +1,23 @@
+{
+  "algorithm": "sha256",
+  "files": {
+    "departments.csv": "dc9c10fda3d3e9ebe10ec86289f9b623ed93722bdbc87e841fd6536df646f961",
+    "payers.csv": "315095b557a89e5faa82f042fda94696f5dcceefefa7e1cd2095ab2980c5614d",
+    "procedures.csv": "8bf5f3878469affff2e35bce674286354c8b0e7c051d69734555b6e9319fde27",
+    "patients.csv": "0ce23422346ad692b7311b4bcaf2f0eba9230697ae19ff3c9673d765224227d0",
+    "doctors.csv": "0922484868fdd67cc36c957924f47220db8f9a8b377125f5763d5125c2446a53",
+    "nurses.csv": "b4ebf5c3b5643f7896da647899f046b9794afcc20227c11079cfd0c3351ace3b",
+    "employees.csv": "428caa3d715e92618c5661ef2ce7cf2ce924f201f1ca1a0ed646729bb09c3a46",
+    "rooms.csv": "5f4a35d200518f1f04cf6a0a498edee74e0775fd892cdfa6165b4ea2b810358b",
+    "admissions.csv": "5f82b6c54b44449f0dc8845142142fa573f3bc57b2e1213d7ae9721a4619e68b",
+    "triage.csv": "c0df0c9ec268ec62c3ba11ba4dfb97846aedb45b50124b4e81083f16b1a47e17",
+    "diagnoses.csv": "1f82abaa2a5a030c12379ee713739fae20c4418cbc8f9678954d7dd046607ad9",
+    "patient_procedures.csv": "6175bdc9a121faba45e1f3bc0fe711cf548701af1f7ce3fa0af7c66675500c51",
+    "medications.csv": "c45907b73f0847aeb13b48d4cbfb2e4a9ebc0cf6e12b71238bdf41d97b92f057",
+    "medical_tests.csv": "3c84095c68583d2fa245c52ebfc28126e49ff2b6c7a020b4d6bfcd0bd2f40a2b",
+    "staff_shifts.csv": "2383ee0e48e531b4d931293a61315cd257ab855cf4d66660e7fe8ae544d15812",
+    "billing.csv": "297f36b9a13defa248afa2b4f2b1c96ac18d6534bf3cfb5e342ad27cbd02af3e",
+    "billing_line_items.csv": "454915ee06af635f4f4c43ddecafd5f67aebba8cec7e12bae4c220aceb3b38ab",
+    "icd10_lookup.csv": "cc162d7447937a97f05e2eaf12851d7d814743273358e38d139d1441069a916f"
+  }
+}

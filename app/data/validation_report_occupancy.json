@@ -1,0 +1,50 @@
+{
+  "as_of": "2026-10-13 12:00:00",
+  "warmup_days": 45,
+  "rooms": 199,
+  "inpatient_beds": 212,
+  "beds_by_type": {
+    "Standard": 82,
+    "Private": 66,
+    "ICU": 43,
+    "NICU": 2,
+    "Isolation": 19
+  },
+  "average_census": 136.8,
+  "average_occupancy_pct": 64.5,
+  "busiest_day_pct": 77.8,
+  "occupancy_by_type_pct": {
+    "Standard": 62.2,
+    "Private": 68.8,
+    "ICU": 71.2,
+    "NICU": 50.8,
+    "Isolation": 46.0
+  },
+  "condition_mix_pct": {
+    "Moderate": 40.6,
+    "Maximum": 30.2,
+    "Minimal": 15.3,
+    "Intensive": 14.0
+  },
+  "admissions_by_status": {
+    "Discharged": 10623,
+    "Cancelled": 615,
+    "Scheduled": 592,
+    "Admitted": 170
+  },
+  "allocation": {
+    "needed_bed": 10844,
+    "placed": 10793,
+    "waited": 2444,
+    "mean_wait_hours": 44.6,
+    "lowered_care_level": 130,
+    "cancelled_for_no_bed": 51,
+    "moved_after_patients_previous_stay": 221,
+    "pct_of_needed_bed": {
+      "waited": 22.54,
+      "lowered_care_level": 1.2,
+      "cancelled_for_no_bed": 0.47,
+      "moved_after_patients_previous_stay": 2.04
+    }
+  }
+}
