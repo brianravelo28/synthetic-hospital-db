@@ -192,8 +192,8 @@ old_7["what"] = old_7["rule"].map(RULE_DESCRIPTIONS)
 old_7 = old_7[old_7["count"] > 0].sort_values("count")
 fig = px.bar(old_7, x="count", y="rule", orientation="h", text="count")
 fig.update_traces(marker_color=STATUS["serious"], texttemplate="%{text:,}", textposition="outside", cliponaxis=False)
-fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, xaxis_title="Violations in the pre-fix dataset",
-                  yaxis_title="", height=520)
+fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, xaxis_title="Violations", yaxis_title="", height=520)
+fig.update_layout(margin=dict(l=10, r=56, t=40, b=10))      # room for the outside bar labels on a narrow screen
 fig.update_xaxes(**AXIS_STYLE)
 fig.update_yaxes(**AXIS_STYLE)
 plot(fig)
