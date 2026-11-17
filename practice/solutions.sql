@@ -16,7 +16,7 @@ GROUP BY patient_id
 ORDER BY admissions DESC, patient_id
 LIMIT 10;
 
--- Q3: Patients by age band and sex
+-- Q3: Patients by age band and gender
 SELECT CASE WHEN age <= 17 THEN '0-17'
             WHEN age <= 39 THEN '18-39'
             WHEN age <= 64 THEN '40-64'

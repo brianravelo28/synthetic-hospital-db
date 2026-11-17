@@ -33,7 +33,7 @@ A few things to know before you start:
 
 1. **How many admissions does each department have?** Show the busiest first. *(joins · `GROUP BY` · `COUNT`)*
 2. **Which ten patients have the most admissions?** *(`ORDER BY` · `LIMIT`)*
-3. **How many patients are in each age band, by gender?** Use the bands 0–17, 18–39, 40–64 and 65+. *(`CASE` · `GROUP BY`)*
+3. **How many patients are in each age band, by gender?** Use the stored `patients.age` and the bands 0–17, 18–39, 40–64 and 65+. *(`CASE` · `GROUP BY`)*
 
 ## Joins and dates
 
