@@ -1,6 +1,5 @@
-# Exact versions, tested together on Python 3.11 (CI + a clean venv; all six
-# dashboard pages render with no exceptions). Bump deliberately, then re-run
-# `pytest` and the dashboard.
+# Exact versions, tested together by CI on Python 3.11 to 3.14. CI does not render
+# the dashboard pages, so after a bump run `pytest` and open the dashboard.
 
 # Data generation & pipeline (data/, src/)
 sqlalchemy==2.1.8

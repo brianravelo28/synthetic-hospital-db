@@ -224,7 +224,7 @@ def test_procedure_rooms_never_hold_an_admission(d):
 
 
 def test_occupancy_is_realistic_not_empty(d):
-    """Average bed occupancy after the first 45 days is far above the old ~6%, and never above 100%."""
+    """Average bed occupancy after the first 45 days is far above a nearly empty hospital's (about 6%), and never above 100%."""
     h = _stays(d)
     beds = d["rooms"][d["rooms"]["room_type"].isin(INPATIENT)]["bed_capacity"].sum()
     first = h["admission_date"].min().normalize()
@@ -250,7 +250,7 @@ def test_sex_at_birth_is_recorded_and_agrees_with_gender_for_m_and_f(d):
 
 
 def test_only_patients_born_female_are_admitted_to_ob_gyn_as_adults(d):
-    """Adults reach OB/GYN only if their sex at birth is F (adult men used to be routed there at random)."""
+    """Adults reach OB/GYN only if their sex at birth is F."""
     adm = d["admissions"].merge(d["patients"][["patient_id", "sex_at_birth", "age"]], on="patient_id")
     adults = adm[(adm["department_id"] == "DEP-009") & (adm["age"] >= 18)]
     assert len(adults) > 0

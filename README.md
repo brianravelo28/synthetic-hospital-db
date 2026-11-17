@@ -33,8 +33,8 @@ Load the CSVs into SQLite and work through the questions, or open the dashboard 
 | Source | What |
 |---|---|
 | This repository | 17 tables, 197,512 rows, from [Faker](https://faker.readthedocs.io/) (names, addresses, dates) and weighted random draws (everything clinical and financial); MIT licence |
-| [ICD-10-CM](https://www.cdc.gov/nchs/icd/icd-10-cm.htm) | 66 real diagnosis codes with hand-set weights; published by the CDC |
-| CPT (American Medical Association) | 30 real procedure code numbers with names written for this project; CPT is copyrighted by the AMA and its descriptors are not reproduced |
+| ICD-10-CM ([International Classification of Diseases, 10th Revision, Clinical Modification](https://www.cdc.gov/nchs/icd/icd-10-cm.htm)) | 66 real diagnosis codes with hand-set weights; published by the CDC (Centers for Disease Control and Prevention) |
+| CPT (Current Procedural Terminology) | 30 real procedure code numbers with names written for this project; CPT is copyrighted by the American Medical Association (AMA) and its descriptors are not reproduced |
 | Five hospital-database designs | the table and field layout ([docs/CITATIONS.md](docs/CITATIONS.md)) |
 
 One admission is one row of `admissions`. The CSVs in `app/data/` come from one pinned run (reference date 2026-10-13 12:00:00); their SHA-256 values are in `app/data/checksums.json`. Only the large size ships; small (800 admissions) and medium (3,200) exist only if you generate them.
@@ -44,7 +44,7 @@ One admission is one row of `admissions`. The CSVs in `app/data/` come from one 
 - **Admissions and stays.** The 12,000 admissions are 10,623 discharged, 170 still admitted, 592 scheduled (after the reference date, up to 11 January 2027) and 615 cancelled; 51 of the cancelled had no bed free in time and the rest were drawn as cancelled. A "stay" is an admission that happened: the 10,793 admitted or discharged.
 - **Occupancy.** Census is the patients in an inpatient bed at midnight; bed occupancy is census divided by inpatient beds. Averages leave out the first 45 days, because the hospital starts empty.
 - **Rates.** Every waiting rate is a share of the 10,844 admissions that needed a bed (the 10,793 stays plus the 51 cancelled for lack of one): 22.5% waited, 1.2% were placed at a lower level of care, 0.47% were cancelled.
-- **Gender and sex at birth.** Two fields. The rules about pregnancy, prostate disease, deliveries and Pap smears use sex at birth. For M and F patients the two agree; for NB patients sex at birth is drawn 50/50.
+- **Gender and sex at birth.** Two fields. The rules about pregnancy, prostate disease, deliveries and Pap smears use sex at birth. For M and F patients the two agree; for NB (non-binary) patients sex at birth is drawn 50/50.
 - **Age.** `patients.age` is the age when the data was generated; the treatment rules use age at admission.
 - **Structure is sourced, numbers are chosen.** Every proportion and amount (diagnosis mix, age, stay length, occupancy targets, charges) is a setting I chose, not a measurement of real hospitals; findings describe this dataset.
 
@@ -55,7 +55,7 @@ One admission is one row of `admissions`. The CSVs in `app/data/` come from one 
 - **The checks catch what the first generator got wrong.** The first generator's output had 99,532 violations on the 51 checks that existed then (6,177 at small size, 25,681 at medium); the current one has 71, then 0 after repair. The check sets differ, so the totals show direction, not a like-for-like rate.
 - **Every check can fail.** For 56 of the 59 rules a test injects one violation and the check reports it; for the other 3 the table's own `CHECK` constraint rejects the row.
 - **Keeping rooms within capacity costs waiting.** At large size 2,444 admissions (22.5%) waited for a bed, for a mean of 45 hours. Rooms are sized by a planned occupancy I chose, so the figure shows what that plan implies, not what hospitals experience.
-- **Small and medium sizes are sparse.** Bed occupancy is 15% at small and 44% at medium, because every department needs a Standard and an ICU room.
+- **Small and medium sizes are sparse.** Bed occupancy is 15% at small and 44% at medium, because every department needs a Standard and an ICU (intensive care unit) room.
 
 ## Run it
 

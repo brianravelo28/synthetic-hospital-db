@@ -2,10 +2,10 @@
 Room planning and allocation, so the hospital runs at a realistic occupancy and
 no room is ever over capacity.
 
-Before this module, rooms were created at random (random department, random
-type) and every admission picked any suitable room with no check that it was
-free, so the hospital was nearly empty and, as soon as it got busier, rooms
-would have been double-booked. Now:
+Rooms are not created at random and an admission does not take any suitable
+room: with a random department and type for each room and no check that a room
+is free, the hospital would be nearly empty and, as soon as it got busier,
+rooms would be double-booked. Instead:
 
   plan_rooms      sizes each department's rooms from its expected patient load
                   and the planned occupancy by room type (OCCUPANCY_TARGET), so

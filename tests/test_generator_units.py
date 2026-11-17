@@ -147,7 +147,7 @@ def test_vitals_ranges_are_plausible_for_age(age):
 # ── generator and validator carry copies of the same constants ───────────
 
 def test_generator_and_validator_share_one_copy_of_each_constant():
-    """They used to carry separate copies held together by "must match" comments."""
+    """They import one copy of each constant, not copies held together by "must match" comments."""
     import shared_rules
     assert gen.CONDITION_ROOM_MAP is vr.CONDITION_ROOM_MAP is shared_rules.CONDITION_ROOM_MAP
     assert gen.MALE_IMPOSSIBLE_CODES is vr.MALE_IMPOSSIBLE_CODES is shared_rules.MALE_IMPOSSIBLE_CODES

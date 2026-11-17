@@ -13,7 +13,7 @@ updates:
         patterns:
           - "*"
     ignore:
-      # NumPy 2.5 and later need Python 3.12 or newer; this project runs on Python 3.11.
+      # NumPy 2.5 and later need Python 3.12 or newer; CI still tests Python 3.11, where they would fail.
       - dependency-name: "numpy"
         versions: [">=2.5"]
   - package-ecosystem: "github-actions"

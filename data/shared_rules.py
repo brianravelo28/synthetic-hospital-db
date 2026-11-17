@@ -2,8 +2,8 @@
 shared_rules.py
 ===============
 Single source of truth for everything the generator and the validator must
-agree on. Both used to carry their own copies ("must match" comments); now they
-import from here, so they can't drift apart.
+agree on. Both import from here instead of carrying their own copies ("must match"
+comments), so they can't drift apart.
 
 Also holds the pipeline's reference date, AS_OF: the moment that "now" means
 for the whole run (generator dates, validator SQL, repair). By default it is

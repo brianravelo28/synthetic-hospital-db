@@ -20,7 +20,12 @@ A generator builds the 17-table database, a validator runs 59 consistency checks
 | Detect-only | A check with no repair; it reports only |
 | Snapshot | One of three named points in the history: pre-patch (the first generator), post-round-one, current |
 | Gender, sex at birth | Two fields on `patients`; sex-specific rules use sex at birth |
-| ICD-10-CM, CPT | The US diagnosis coding system; the procedure coding system (copyrighted by the American Medical Association) |
+| ICD-10-CM | International Classification of Diseases, 10th Revision, Clinical Modification: the US diagnosis coding system, published by the CDC (Centers for Disease Control and Prevention) and its National Center for Health Statistics (NCHS) |
+| CPT | Current Procedural Terminology: the procedure coding system, copyrighted by the American Medical Association |
+| USCDI | United States Core Data for Interoperability, a US health-data standard from the Office of the National Coordinator for Health Information Technology (ONC) |
+| NB | Non-binary: one of the three `gender` values (M, F, NB) |
+| ICU, NICU | Intensive care unit; neonatal (newborn) intensive care unit. Both are room types |
+| OB/GYN | Obstetrics and gynecology (pregnancy, childbirth and women's health): a department |
 | ESI | Emergency Severity Index, a 1 (most urgent) to 5 triage scale |
 | Foreign key, `CHECK` | A column linking to another table's row; a constraint that rejects a row breaking a rule |
 

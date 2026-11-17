@@ -1,13 +1,12 @@
 """
 Diagnosis-to-treatment mapping for the generator.
 
-Before this module, procedures, medications and tests were drawn uniformly at
-random from their catalogs, so a cardiac-surgery bypass could land on a
-toddler's admission and chemotherapy on a patient with no cancer diagnosis
-(measured: 4,699 contradictions across six checks at large scale; see
-docs/METHODOLOGY.md).
+Drawing procedures, medications and tests uniformly at random from their
+catalogs would put a cardiac-surgery bypass on a toddler's admission and
+chemotherapy on a patient with no cancer diagnosis (measured: 4,699
+contradictions across six checks at large scale; see docs/METHODOLOGY.md).
 
-Now each admission's diagnoses decide which treatments are plausible:
+Instead each admission's diagnoses decide which treatments are plausible:
 
     ICD-10 code -> family -> procedure ids / drug names / test names
 

@@ -240,7 +240,6 @@ def load_validation() -> dict:
         "meta": meta,
         "runs": pd.read_csv(DATA_DIR / "validation_runs.csv"),
         "baseline": pd.read_csv(DATA_DIR / "validation_baseline_pre_fix.csv"),
-        "baseline_clinical": pd.read_csv(DATA_DIR / "validation_baseline_pre_coherence.csv"),
     }
 
 
@@ -326,7 +325,7 @@ def chart_table(fig) -> pd.DataFrame | None:
     """The numbers behind a Plotly figure as a table, read from the figure itself
     so the chart and its table view cannot disagree. Returns None if the figure
     has nothing tabulable. Histograms (raw values, binned by the browser) get
-    summary statistics instead of bins we would have to guess."""
+    summary statistics instead of bins I would have to guess."""
     traces = [t for t in fig.data if t.type in ("bar", "scatter", "pie", "histogram")]
     if not traces:
         return None

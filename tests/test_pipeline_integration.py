@@ -50,7 +50,7 @@ def test_all_59_checks_ran(result):
 
 
 def test_generator_prevents_admission_type_and_financial_violations(result):
-    """Groups 3 and 6 used to be fixed only by repair; the generator now avoids them."""
+    """The generator prevents the Group 3 and Group 6 violations, so repair has none to fix."""
     r = result["report"]
     for group in ("group3_admission_type", "group6_financial"):
         assert r.loc[r["group"] == group, "before_repair"].sum() == 0, group

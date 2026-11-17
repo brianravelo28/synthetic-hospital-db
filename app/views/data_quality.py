@@ -103,7 +103,6 @@ GRAY = "#b9b8b0"   # de-emphasis tone for the "before" bars
 
 val = load_validation()
 report, meta, runs, baseline = val["report"], val["meta"], val["runs"], val["baseline"]
-baseline_clinical = val["baseline_clinical"]
 
 report["group_short"] = report["group"].map(GROUP_SHORT)
 report["what"] = report["rule"].map(RULE_DESCRIPTIONS).fillna("")
@@ -200,35 +199,22 @@ plot(fig)
 
 st.divider()
 
-# ── Clinical coherence: before / after the diagnosis-linked generator ────
+# ── Clinical coherence (Group 8) ─────────────────────────────────────────
 st.subheader("Do the treatments fit the patient and the diagnosis?")
-clin = baseline_clinical.rename(columns={"count": "before"}).merge(
-    report[["rule", "before_repair"]].rename(columns={"before_repair": "now"}), on="rule", how="left"
-)
+clinical = report[report["group"] == "group8_clinical"]
 st.markdown(
-    f"Procedures, medications and tests used to be drawn at random, independent of each other and of "
-    f"the patient. Six hard contradictions (a delivery on a patient born male, chemotherapy with no cancer "
-    f"diagnosis, insulin with no diabetes) showed up **{fmt_count(clin['before'].sum())}** times in the "
-    f"earlier large dataset. The generator now chooses treatments from each admission's own diagnoses "
-    f"and the patient's sex at birth and age; the same six checks find **{fmt_count(clin['now'].sum())}** now. "
-    f"The checks are written from CPT codes and drug names, separately from the generator's mapping."
+    f"Group 8 runs {len(clinical)} checks for treatments that contradict the patient or the diagnosis: a "
+    "delivery on a patient who was not born female, chemotherapy with no cancer diagnosis, insulin with no "
+    "diabetes diagnosis, and similar. They are written from CPT codes and drug names, separately from the "
+    f"generator's treatment mapping. The latest run finds **{fmt_count(clinical['after_repair'].sum())}** "
+    "violations across the six."
 )
-cl = clin.melt(id_vars="rule", value_vars=["before", "now"], var_name="stage", value_name="violations")
-cl["stage"] = cl["stage"].map({"before": "Earlier generator", "now": "Current generator"})
-order = clin.sort_values("before")["rule"].tolist()
-fig = px.bar(
-    cl, x="violations", y="rule", color="stage", orientation="h", barmode="group",
-    color_discrete_map={"Earlier generator": GRAY, "Current generator": CATEGORICAL[0]},
-    category_orders={"stage": ["Earlier generator", "Current generator"], "rule": order},
+st.dataframe(
+    clinical[["rule", "what", "after_repair"]].rename(columns={
+        "rule": "Check", "what": "What it catches", "after_repair": "Violations",
+    }),
+    hide_index=True, width="stretch",
 )
-fig.update_traces(texttemplate="%{x:,}", textposition="outside", cliponaxis=False)   # label the zeros too
-fig.update_layout(**PLOTLY_LAYOUT, xaxis_title="Violations", yaxis_title="",
-                  height=380, legend_title_text="")
-# room for the outside bar labels and a two-line legend when the screen is narrow
-fig.update_layout(margin=dict(l=10, r=48, t=75, b=10))
-fig.update_xaxes(**AXIS_STYLE)
-fig.update_yaxes(**AXIS_STYLE)
-plot(fig)
 
 st.divider()
 

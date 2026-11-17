@@ -563,7 +563,7 @@ def repair_admission_type(conn):
 
     # ── Scheduled/Cancelled: delete clinical records ───────────────────────
     # ON DELETE CASCADE handles child records of these tables
-    # but we delete directly to be explicit
+    # but I delete directly to be explicit
     for table in ['triage', 'diagnoses', 'patient_procedures',
                   'medications', 'medical_tests']:
         conn.execute(text(f"""
