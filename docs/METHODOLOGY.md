@@ -28,7 +28,7 @@ A generator builds the 17-table database, a validator runs 59 consistency checks
 
 | Source | What | Version used |
 |---|---|---|
-| This repository's generator | 17 tables; names, addresses and dates from Faker, everything clinical and financial from weighted random draws | Faker 40.43.0; seeds fixed; reference date 2026-10-13 12:00:00 |
+| This repository's generator | 17 tables; names, addresses and dates from Faker, everything clinical and financial from weighted random draws | Faker 40.44.0; seeds fixed; reference date 2026-10-13 12:00:00 |
 | ICD-10-CM (CDC/NCHS) | 66 real diagnosis codes in 13 categories, selected by hand, with hand-set weights | not versioned |
 | CPT (AMA) | 30 real procedure code numbers with names written for this project; the AMA's descriptors are not reproduced | not versioned |
 | Five hospital-database designs | the table and field layout | [CITATIONS.md](CITATIONS.md) |
@@ -207,7 +207,7 @@ Some waiting is unavoidable at a realistic occupancy. Small and medium stay spar
 
 **Data version.** `app/data/checksums.json` holds the SHA-256 of each of the 18 CSVs, taken with CRLF line endings read as LF so that Windows and Linux checkouts give the same value; a test checks them. A generator change that moves the random stream changes rows that follow it: the round-five change moved the stream before staff are generated, so the four staff files changed (every row), which the checksums make visible.
 
-**Software.** Python 3.11 to 3.14 (CI). Dependencies are pinned exactly in `requirements.txt` and `app/requirements.txt`: SQLAlchemy 2.1.7, PyMySQL 1.2.3, Faker 40.43.0, NumPy 2.4.6, pandas 3.1.0, Streamlit 1.66.1, Plotly 7.1.0. NumPy 2.5 needs Python 3.12 or later and is not applied. The integration tests run on MariaDB 10.4 (end of life June 2024; what XAMPP ships) and 10.11.
+**Software.** Python 3.11 to 3.14 (CI). Dependencies are pinned exactly in `requirements.txt` and `app/requirements.txt`: SQLAlchemy 2.1.8, PyMySQL 1.2.3, Faker 40.44.0, NumPy 2.4.6, pandas 3.1.1, Streamlit 1.67.0, Plotly 7.1.0. NumPy 2.5 needs Python 3.12 or later and is not applied. The integration tests run on MariaDB 10.4 (end of life June 2024; what XAMPP ships) and 10.11.
 
 **Tests.** `tests/` runs without a database except the integration tests, which regenerate the target database and run only when `HOSPITAL_DB_URL` is set.
 
