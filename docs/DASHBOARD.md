@@ -6,6 +6,8 @@ How the dashboard in `app/` is put together and why. The implementation is in `a
 
 The sidebar on every page says the data is synthetic, that the table layout follows published hospital-database designs, and that every number and proportion is chosen rather than measured; it links to `docs/CITATIONS.md`.
 
+On a phone-width screen (375 px) the sidebar starts collapsed and no page scrolls sideways.
+
 The dashboard reads only the CSVs in `app/data/`, never a live database. That is what lets it run unchanged on Streamlit Community Cloud, which cannot reach a local database. `app/requirements.txt` lists just what the dashboard needs (`streamlit`, `pandas`, `plotly`) at exact versions, because Streamlit Cloud installs from the requirements file next to the app's entry point.
 
 ## Layout

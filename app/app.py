@@ -6,7 +6,7 @@ st.set_page_config(
     page_title="Hospital Operations Dashboard",
     page_icon="🏥",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
 
 st.markdown(BASE_CSS, unsafe_allow_html=True)

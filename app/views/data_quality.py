@@ -222,8 +222,10 @@ fig = px.bar(
     category_orders={"stage": ["Earlier generator", "Current generator"], "rule": order},
 )
 fig.update_traces(texttemplate="%{x:,}", textposition="outside", cliponaxis=False)   # label the zeros too
-fig.update_layout(**PLOTLY_LAYOUT, xaxis_title="Violations (large scale, before repair)", yaxis_title="",
+fig.update_layout(**PLOTLY_LAYOUT, xaxis_title="Violations", yaxis_title="",
                   height=380, legend_title_text="")
+# room for the outside bar labels and a two-line legend when the screen is narrow
+fig.update_layout(margin=dict(l=10, r=48, t=75, b=10))
 fig.update_xaxes(**AXIS_STYLE)
 fig.update_yaxes(**AXIS_STYLE)
 plot(fig)
