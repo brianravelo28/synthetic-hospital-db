@@ -2,9 +2,9 @@
 # the dashboard pages, so after a bump run `pytest` and open the dashboard.
 
 # Data generation & pipeline (data/, src/)
-sqlalchemy==2.1.8
-pymysql==1.2.3
-faker==40.44.0
+sqlalchemy==2.1.9
+pymysql==1.2.4
+faker==40.63.0
 numpy==2.4.6
 pandas==3.1.1
 
